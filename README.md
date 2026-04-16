@@ -176,11 +176,17 @@ python scripts\query_confluence_vector_store.py "How are leads qualified?" --mod
 from pathlib import Path
 
 from cortex_rag.retrieval import (
+    preload_sentence_transformer,
     embed_confluence_query,
     retrieve_confluence_context,
     retrieve_confluence_context_by_embedding,
     similarity_search_confluence_vector_store,
     similarity_search_confluence_vector_store_by_embedding,
+)
+
+preload_sentence_transformer(
+    model_name="sentence-transformers/all-MiniLM-L6-v2",
+    device="cpu",
 )
 
 context_results = retrieve_confluence_context(
@@ -219,6 +225,9 @@ raw_results = similarity_search_confluence_vector_store_by_embedding(
 - The higher-level `retrieve_confluence_context(...)` path is intended for downstream generation prep.
 - The lower-level `similarity_search_confluence_vector_store(...)` APIs remain available when you want raw nearest-neighbor results without reranking or deduplication.
 - The older `query_confluence_vector_store(...)` and `search_confluence_vector_store_by_embedding(...)` names still work as compatibility aliases.
+- SentenceTransformer query encoders are cached in-process by `(model_name, device)`.
+- `preload_sentence_transformer(...)` is intended for long-lived app startup so the embedding model stays hot between requests.
+- Separate one-shot script runs do not share that cache because each run starts a new Python process.
 
 ### 9. Generate an Answer with Ollama
 - Run the end-to-end retrieval-plus-generation script after the vector store has been built:
@@ -245,6 +254,18 @@ python scripts\ask_confluence.py "How are leads qualified?" --mode technical
 python scripts\ask_confluence.py "Summarize the architecture" --mode bullet_summary
 ```
 
+- You can reduce latency by lowering the retrieved context and generated output size:
+
+```powershell
+python scripts\ask_confluence.py "What does the architecture say about the execution layer?" --top-k 2 --num-ctx 4096 --max-tokens 80 --mode concise
+```
+
+- You can stream the answer and show time-to-first-token timing:
+
+```powershell
+python scripts\ask_confluence.py "What does the architecture say about the execution layer?" --stream --max-tokens 80
+```
+
 - You can also override them per run:
 
 ```powershell
@@ -254,6 +275,7 @@ python scripts\ask_confluence.py "How are leads qualified?" --ollama-model mistr
 Notes:
 - The repository currently defaults to `llama3.2:3b` for Ollama generation.
 - Query embedding retries from the local Hugging Face cache when network access is unavailable.
+- Query encoders are cached only within the current Python process. To keep the embedding model hot, preload it in a long-lived service or REPL session.
 - If the embedding model is not cached locally, pass a local model path with `--embedding-model`.
 
 ## Tools and Libraries

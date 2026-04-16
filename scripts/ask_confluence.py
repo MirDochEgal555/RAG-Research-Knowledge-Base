@@ -17,13 +17,14 @@ from cortex_rag.config import (
     DEFAULT_OLLAMA_HOST,
     DEFAULT_OLLAMA_MODEL,
     DEFAULT_OLLAMA_NUM_CTX,
+    DEFAULT_OLLAMA_NUM_PREDICT,
     DEFAULT_OLLAMA_TEMPERATURE,
     DEFAULT_RAG_ANSWER_MODE,
     DEFAULT_RAG_PROMPT_PATH,
     DEFAULT_VECTOR_COLLECTION,
     VECTOR_DB_DIR,
 )
-from cortex_rag.generation import build_confluence_rag_messages, chat_with_ollama
+from cortex_rag.generation import GenerationResult, build_confluence_rag_messages, chat_with_ollama
 from cortex_rag.retrieval import (
     SearchResult,
     embed_confluence_query,
@@ -45,7 +46,7 @@ def main() -> None:
     parser.add_argument(
         "--top-k",
         type=int,
-        default=5,
+        default=2,
         help="Number of reranked chunks to include in the prompt.",
     )
     parser.add_argument(
@@ -112,8 +113,19 @@ def main() -> None:
     parser.add_argument(
         "--num-ctx",
         type=int,
-        default=DEFAULT_OLLAMA_NUM_CTX,
+        default=min(DEFAULT_OLLAMA_NUM_CTX, 4096),
         help="Context window passed to Ollama.",
+    )
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=DEFAULT_OLLAMA_NUM_PREDICT,
+        help="Maximum number of tokens Ollama should generate.",
+    )
+    parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Stream the answer as tokens arrive and report time to first token.",
     )
     args = parser.parse_args()
 
@@ -161,19 +173,17 @@ def main() -> None:
         answer_mode=args.mode,
     )
     generation_started_at = perf_counter()
-    answer = chat_with_ollama(
-        messages,
-        host=args.ollama_host,
-        model=args.ollama_model,
-        temperature=args.temperature,
-        num_ctx=args.num_ctx,
-    )
+    answer = _generate_answer(args, messages)
     generation_seconds = perf_counter() - generation_started_at
     total_seconds = perf_counter() - total_started_at
 
-    print("Answer:")
-    print(answer.content)
-    print()
+    if not args.stream:
+        print("Answer:")
+        print(answer.content)
+        print()
+    else:
+        print()
+        print()
     print("Sources:")
     _print_search_results(results)
     print()
@@ -182,6 +192,7 @@ def main() -> None:
         retrieval_seconds=retrieval_seconds,
         generation_seconds=generation_seconds,
         total_seconds=total_seconds,
+        first_token_seconds=answer.first_token_seconds,
     )
 
 
@@ -208,16 +219,47 @@ def _print_timings(
     retrieval_seconds: float,
     generation_seconds: float,
     total_seconds: float,
+    first_token_seconds: float | None = None,
 ) -> None:
     print("Timings:")
     print(f"embedding: {_format_duration(embedding_seconds)}")
     print(f"retrieval: {_format_duration(retrieval_seconds)}")
+    if first_token_seconds is not None:
+        print(f"first_token: {_format_duration(first_token_seconds)}")
     print(f"generation: {_format_duration(generation_seconds)}")
     print(f"total: {_format_duration(total_seconds)}")
 
 
 def _format_duration(seconds: float) -> str:
     return f"{seconds:.2f}s"
+
+
+def _generate_answer(args: argparse.Namespace, messages: list[dict[str, str]]) -> GenerationResult:
+    if args.stream:
+        print("Answer:")
+        return chat_with_ollama(
+            messages,
+            host=args.ollama_host,
+            model=args.ollama_model,
+            temperature=args.temperature,
+            num_ctx=args.num_ctx,
+            num_predict=args.max_tokens,
+            stream=True,
+            token_callback=_stream_token,
+        )
+
+    return chat_with_ollama(
+        messages,
+        host=args.ollama_host,
+        model=args.ollama_model,
+        temperature=args.temperature,
+        num_ctx=args.num_ctx,
+        num_predict=args.max_tokens,
+    )
+
+
+def _stream_token(token: str) -> None:
+    print(token, end="", flush=True)
 
 
 if __name__ == "__main__":

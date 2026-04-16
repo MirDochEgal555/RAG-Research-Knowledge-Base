@@ -4,6 +4,10 @@ from cortex_rag.retrieval.confluence_embeddings import (
     generate_confluence_embeddings,
     generate_confluence_space_embeddings,
 )
+from cortex_rag.retrieval.embedding_utils import (
+    clear_sentence_transformer_cache,
+    preload_sentence_transformer,
+)
 from cortex_rag.retrieval.vector_store import (
     SearchResult,
     VectorStoreBuildResult,
@@ -22,10 +26,12 @@ __all__ = [
     "SearchResult",
     "VectorStoreBuildResult",
     "build_confluence_vector_store",
+    "clear_sentence_transformer_cache",
     "embed_confluence_query",
     "generate_confluence_embeddings",
     "generate_confluence_space_embeddings",
     "load_vector_store_manifest",
+    "preload_sentence_transformer",
     "query_confluence_vector_store",
     "retrieve_confluence_context",
     "retrieve_confluence_context_by_embedding",

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 import os
 from pathlib import Path
+from threading import Lock
 from typing import Any, Protocol
 
 
@@ -15,7 +16,17 @@ class TextEncoder(Protocol):
         """Return one vector per input text."""
 
 
+_ENCODER_CACHE: dict[tuple[str, str | None], TextEncoder] = {}
+_ENCODER_CACHE_LOCK = Lock()
+
+
 def load_sentence_transformer(*, model_name: str, device: str | None) -> TextEncoder:
+    cache_key = (model_name, device)
+    with _ENCODER_CACHE_LOCK:
+        cached_encoder = _ENCODER_CACHE.get(cache_key)
+    if cached_encoder is not None:
+        return cached_encoder
+
     try:
         from sentence_transformers import SentenceTransformer
     except ImportError as exc:
@@ -30,19 +41,39 @@ def load_sentence_transformer(*, model_name: str, device: str | None) -> TextEnc
     if _cached_hugging_face_model_dir(model_name) is not None:
         kwargs["local_files_only"] = True
     try:
-        return SentenceTransformer(model_name, **kwargs)
+        encoder = SentenceTransformer(model_name, **kwargs)
     except Exception:
         # When the model is already cached locally, a local-files-only retry keeps
         # query-time embedding generation working even if network access is blocked.
         offline_kwargs = dict(kwargs)
         offline_kwargs["local_files_only"] = True
         try:
-            return SentenceTransformer(model_name, **offline_kwargs)
+            encoder = SentenceTransformer(model_name, **offline_kwargs)
         except Exception as exc:
             raise RuntimeError(
                 "Unable to load the embedding model. "
                 "Ensure the model is cached locally or pass a local model path."
             ) from exc
+
+    with _ENCODER_CACHE_LOCK:
+        existing_encoder = _ENCODER_CACHE.get(cache_key)
+        if existing_encoder is not None:
+            return existing_encoder
+        _ENCODER_CACHE[cache_key] = encoder
+    return encoder
+
+
+def preload_sentence_transformer(*, model_name: str, device: str | None) -> TextEncoder:
+    """Load and cache a sentence-transformer model ahead of the first query."""
+
+    return load_sentence_transformer(model_name=model_name, device=device)
+
+
+def clear_sentence_transformer_cache() -> None:
+    """Clear the in-process sentence-transformer cache."""
+
+    with _ENCODER_CACHE_LOCK:
+        _ENCODER_CACHE.clear()
 
 
 def _cached_hugging_face_model_dir(model_name: str) -> Path | None:

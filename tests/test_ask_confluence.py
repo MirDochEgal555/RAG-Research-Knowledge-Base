@@ -24,6 +24,7 @@ def test_print_timings_formats_all_stages(capsys) -> None:
     ask_confluence._print_timings(
         embedding_seconds=1.23,
         retrieval_seconds=0.45,
+        first_token_seconds=0.89,
         generation_seconds=6.78,
         total_seconds=8.46,
     )
@@ -32,6 +33,7 @@ def test_print_timings_formats_all_stages(capsys) -> None:
         "Timings:",
         "embedding: 1.23s",
         "retrieval: 0.45s",
+        "first_token: 0.89s",
         "generation: 6.78s",
         "total: 8.46s",
     ]

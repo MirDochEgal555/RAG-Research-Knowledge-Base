@@ -20,12 +20,14 @@ The repository already supports the retrieval side of the pipeline:
 - embedding generation under `storage/embeddings/`
 - persistent vector store creation under `storage/chroma/`
 - context retrieval via `scripts/query_confluence_vector_store.py`
+- end-to-end retrieval plus generation via `scripts/ask_confluence.py`
 
-The generation side is not fully wired yet. Production planning should therefore assume:
+The repository also includes a local Ollama integration path. Production planning should assume:
 
 - Ollama will be the local inference runtime
 - generation code should live behind a small adapter in `src/cortex_rag/generation/`
 - runtime configuration should come from environment variables or a small config layer
+- query-time embedding models should be preloaded inside a long-lived process to avoid repeated cold starts
 
 ## Recommended Production Architecture
 For the first server deployment, keep the architecture simple:
@@ -128,7 +130,9 @@ CORTEX_RAG_ENV=production
 OLLAMA_HOST=http://127.0.0.1:11434
 OLLAMA_MODEL=llama3.2:3b
 OLLAMA_NUM_CTX=8192
+OLLAMA_NUM_PREDICT=192
 OLLAMA_TEMPERATURE=0.2
+RAG_ANSWER_MODE=normal
 VECTOR_DB_DIR=/var/lib/cortexrag/storage/chroma
 VECTOR_COLLECTION=confluence
 EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
@@ -149,6 +153,32 @@ Production will need persistent storage for:
 At minimum, the vector-store and embedding outputs must persist across restarts.
 
 Do not treat `storage/chroma/` as disposable unless you are intentionally rebuilding the index.
+
+## Keeping the Embedding Model Hot
+SentenceTransformer load time can dominate request latency if every query starts a fresh Python process.
+
+Production guidance:
+
+- run retrieval inside a long-lived application process
+- preload the embedding model once during startup
+- reuse the cached encoder for later queries in the same process
+
+The current retrieval package exposes:
+
+```python
+from cortex_rag.retrieval import preload_sentence_transformer
+
+preload_sentence_transformer(
+    model_name="sentence-transformers/all-MiniLM-L6-v2",
+    device="cpu",
+)
+```
+
+Important constraint:
+
+- this cache is in-process only
+- one-shot script invocations do not share it across runs
+- a service, API process, or worker process does
 
 ## Ingestion Strategy in Production
 There are two valid approaches.
@@ -321,8 +351,7 @@ Before first production rollout:
 - decide whether ingestion happens on the server or outside it
 - pin the production Ollama model tag
 - make generation config environment-driven
-- add a small Ollama adapter under `src/cortex_rag/generation/`
-- add one end-to-end retrieval plus generation entry point
+- preload the embedding model during application startup
 - verify all writable directories exist and persist across restarts
 - verify the vector store is present on the server
 - verify the required embedding model is available
@@ -360,11 +389,11 @@ If artifacts are shipped separately, version them so you can restore a known-goo
 ## Recommended Next Engineering Steps in This Repo
 To make the repository production-ready, the next code changes should be:
 
-1. add environment-driven generation settings in `src/cortex_rag/config.py`
-2. add `src/cortex_rag/generation/ollama_client.py`
-3. add one retrieval-plus-generation script such as `scripts/ask_confluence.py`
-4. add a `.env.example`
-5. add deployment scripts or service examples once the runtime interface is stable
+1. add a `.env.example`
+2. add a long-lived API or app process that preloads the embedding model at startup
+3. add deployment scripts or service examples once the runtime interface is stable
+4. add request-level logging and timing around retrieval and generation
+5. tighten retrieval quality so fewer irrelevant chunks reach the prompt
 
 ## Non-Goals for the First Production Version
 Do not overbuild the first server deployment.

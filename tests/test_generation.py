@@ -113,6 +113,7 @@ def test_chat_with_ollama_passes_expected_request_options() -> None:
         model="llama3.2:3b",
         temperature=0.1,
         num_ctx=4096,
+        num_predict=128,
         keep_alive="10m",
         client_factory=FakeClient,
     )
@@ -120,6 +121,7 @@ def test_chat_with_ollama_passes_expected_request_options() -> None:
     assert result == GenerationResult(
         model="llama3.2:3b",
         content="Grounded answer.",
+        first_token_seconds=0.0,
         prompt_eval_count=42,
         eval_count=11,
         done_reason="stop",
@@ -135,6 +137,60 @@ def test_chat_with_ollama_passes_expected_request_options() -> None:
         "options": {
             "temperature": 0.1,
             "num_ctx": 4096,
+            "num_predict": 128,
         },
         "keep_alive": "10m",
     }
+
+
+def test_chat_with_ollama_streams_and_reports_first_token() -> None:
+    streamed_tokens: list[str] = []
+
+    class FakeResponse:
+        def __init__(
+            self,
+            *,
+            content: str,
+            done_reason: str | None = None,
+            prompt_eval_count: int | None = None,
+            eval_count: int | None = None,
+        ) -> None:
+            self.model = "llama3.2:3b"
+            self.message = type("Message", (), {"content": content})()
+            self.done_reason = done_reason
+            self.prompt_eval_count = prompt_eval_count
+            self.eval_count = eval_count
+
+    class FakeClient:
+        def __init__(self, *, host: str) -> None:
+            self.host = host
+
+        def chat(self, **kwargs: object):
+            assert kwargs["stream"] is True
+            return iter(
+                [
+                    FakeResponse(content="Grounded "),
+                    FakeResponse(
+                        content="answer.",
+                        done_reason="stop",
+                        prompt_eval_count=21,
+                        eval_count=7,
+                    ),
+                ]
+            )
+
+    result = chat_with_ollama(
+        [{"role": "user", "content": "Question:\nWhat is the architecture?"}],
+        stream=True,
+        token_callback=streamed_tokens.append,
+        client_factory=FakeClient,
+    )
+
+    assert result.model == "llama3.2:3b"
+    assert result.content == "Grounded answer."
+    assert result.first_token_seconds is not None
+    assert result.first_token_seconds >= 0.0
+    assert result.prompt_eval_count == 21
+    assert result.eval_count == 7
+    assert result.done_reason == "stop"
+    assert streamed_tokens == ["Grounded ", "answer."]
