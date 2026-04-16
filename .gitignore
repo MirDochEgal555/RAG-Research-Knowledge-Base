@@ -31,6 +31,10 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# Local notebooks and experiment output
+notebooks/*
+!notebooks/.gitkeep
+
 # Python build artifacts
 *.pyc
 *.pyo
@@ -39,7 +43,7 @@ build/
 dist/
 *.egg-info/
 
-# Local generated data
+# Local/generated corpus data and vector-store artifacts
 data/tmp*/
 data/raw/*
 !data/raw/.gitkeep
