@@ -1,32 +1,51 @@
 # Lightweight Local RAG Q&A Chatbot
 
 ## Project Overview
-This project is a lightweight Retrieval-Augmented Generation (RAG) system that answers questions based on a small set of personal documents. It retrieves relevant document chunks and generates answers using a local language model—no external API costs.
+This project is a lightweight Retrieval-Augmented Generation (RAG) system that answers questions from a small local knowledge base. The current ingestion workflow is built around Confluence space exports in HTML format, zipped per space, then normalized into Markdown for later chunking, embedding, and retrieval.
 
-## Steps
+## Current Knowledge Ingestion Process
 
-### 1. Document Selection
-- Choose relevant documents: research notes, project docs, or articles.
-- Convert them to clean text (plain text, Markdown, etc.).
+### 1. Export Confluence Spaces
+- Export each Confluence space as an HTML export.
+- Keep one `.zip` file per space.
+- Store the archives in `data/raw/confluence/`.
+- Prefer stable filenames such as `ASA_2026-04-16.zip`.
 
-### 2. Embedding Creation
-- Use a small embedding model, e.g., Sentence Transformers.
-- Split your documents into chunks (paragraphs or sections).
-- Convert each chunk into an embedding vector.
+### 2. Preprocess HTML Exports into Markdown
+- Run the preprocessing script:
 
-### 3. Vector Database Setup
-- Install and set up FAISS (or another local vector store).
-- Store all chunk embeddings in the vector database.
+```powershell
+python scripts\preprocess_confluence_exports.py
+```
 
-### 4. Local LLM Setup
-- Choose a small local model, e.g., a lightweight LLaMA or Mistral variant.
-- Use tools like Ollama or LM Studio to run it locally.
+- The script scans every zip in `data/raw/confluence/`.
+- Each Confluence page is converted into a Markdown file under `data/processed/confluence/<SPACE_KEY>/`.
+- The space landing page is also converted and written as `space-index.md`.
 
-### 5. Query Pipeline
-- When a question is asked, create an embedding for the query.
-- Retrieve the top relevant chunks from the vector database.
-- Feed the chunks plus the query into your local LLM.
-- Generate an answer based on the retrieved context.
+### 3. Preserve Useful Metadata
+Every generated Markdown file includes YAML front matter with:
+- `space_key`
+- `space_name`
+- `page_title`
+- `page_type`
+- `source_zip`
+- `source_html`
+- `breadcrumbs` when available
+- `created_by` and `created_on` when present in the export
+
+### 4. Normalize for Retrieval
+During preprocessing, the converter:
+- reads Confluence page content from the exported HTML structure
+- strips export chrome such as styles and decorative images
+- preserves headings, links, lists, blockquotes, code blocks, and tables
+- resolves internal Confluence page links to local Markdown links
+- produces stable Markdown filenames derived from page title and page id
+
+### 5. Next Pipeline Step
+- Chunk the generated Markdown files into retrieval-sized sections.
+- Create embeddings for those chunks.
+- Store them in the local vector database.
+- Use the retrieved chunks as context for local generation.
 
 ## Tools and Libraries
 - Embeddings: Sentence Transformers
@@ -56,15 +75,18 @@ pip install -r requirements-dev.txt
 ```text
 CortexRAG/
 ├── data/
-│   ├── raw/          # Source documents
+│   ├── raw/          # Source documents and exports
+│   │   └── confluence/   # Confluence HTML exports (.zip), one per space
 │   ├── processed/    # Cleaned text extracted from documents
+│   │   └── confluence/   # Markdown pages generated from Confluence exports
 │   └── chunks/       # Chunked text ready for embedding
 ├── notebooks/        # Experiments and one-off exploration
 ├── prompts/          # Prompt templates for local generation
 ├── scripts/          # Helper scripts for ingestion or maintenance
+│   └── preprocess_confluence_exports.py
 ├── src/
 │   └── cortex_rag/
-│       ├── ingestion/   # Loading and chunking
+│       ├── ingestion/   # Loading, preprocessing, and chunking
 │       ├── retrieval/   # Embeddings and vector search
 │       ├── generation/  # Local model interaction
 │       ├── pipeline/    # End-to-end orchestration
@@ -75,9 +97,20 @@ CortexRAG/
 └── tests/            # Automated tests
 ```
 
+## Generated Output Example
+For an archive like `data/raw/confluence/ASA_2026-04-16.zip`, the script writes Markdown files such as:
+- `data/processed/confluence/ASA/space-index.md`
+- `data/processed/confluence/ASA/overview-3178688.md`
+- `data/processed/confluence/ASA/architecture-3309569.md`
+
+## Implementation Notes
+- The preprocessing logic lives in `src/cortex_rag/ingestion/confluence_html.py`.
+- The ingestion package exposes `preprocess_confluence_archive` and `preprocess_confluence_exports`.
+- The current converter uses only the Python standard library.
+
 ## Next Steps
-1. Gather documents and preprocess them.
-2. Install FAISS and create embeddings.
-3. Set up a local LLM environment.
-4. Build the retrieval-and-generate pipeline.
-5. Test with simple questions and iterate!
+1. Keep raw Confluence exports in `data/raw/confluence/`.
+2. Re-run preprocessing whenever a new export is added.
+3. Add chunk generation from `data/processed/confluence/`.
+4. Build embeddings and retrieval on top of those chunks.
+5. Connect the retrieval output to the local generation pipeline.
