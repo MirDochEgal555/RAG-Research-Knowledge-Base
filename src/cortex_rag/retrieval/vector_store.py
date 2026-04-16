@@ -100,6 +100,40 @@ def query_confluence_vector_store(
 ) -> list[SearchResult]:
     """Embed a query string and search the persistent vector store."""
 
+    query_embedding, manifest = embed_confluence_query(
+        query_text,
+        persist_dir=persist_dir,
+        collection_name=collection_name,
+        backend=backend,
+        model_name=model_name,
+        batch_size=batch_size,
+        normalize_embeddings=normalize_embeddings,
+        device=device,
+        encoder=encoder,
+    )
+    return search_confluence_vector_store_by_embedding(
+        query_embedding,
+        top_k=top_k,
+        persist_dir=persist_dir,
+        collection_name=collection_name,
+        backend=manifest.backend,
+    )
+
+
+def embed_confluence_query(
+    query_text: str,
+    *,
+    persist_dir: Path = VECTOR_DB_DIR,
+    collection_name: str = DEFAULT_VECTOR_COLLECTION,
+    backend: VectorBackend = "auto",
+    model_name: str | None = None,
+    batch_size: int = 32,
+    normalize_embeddings: bool = True,
+    device: str | None = None,
+    encoder: TextEncoder | None = None,
+) -> tuple[list[float], VectorStoreManifest]:
+    """Embed a query string using the vector store's configured embedding model."""
+
     manifest = load_vector_store_manifest(
         persist_dir=persist_dir,
         collection_name=collection_name,
@@ -113,13 +147,7 @@ def query_confluence_vector_store(
         batch_size=batch_size,
         normalize_embeddings=normalize_embeddings,
     )
-    return search_confluence_vector_store_by_embedding(
-        vectors[0],
-        top_k=top_k,
-        persist_dir=persist_dir,
-        collection_name=collection_name,
-        backend=manifest.backend,
-    )
+    return vectors[0], manifest
 
 
 def search_confluence_vector_store_by_embedding(

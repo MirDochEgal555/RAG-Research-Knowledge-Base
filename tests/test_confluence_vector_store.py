@@ -16,6 +16,7 @@ if str(SRC_DIR) not in sys.path:
 
 from cortex_rag.retrieval.vector_store import (
     build_confluence_vector_store,
+    embed_confluence_query,
     load_vector_store_manifest,
     query_confluence_vector_store,
     search_confluence_vector_store_by_embedding,
@@ -162,6 +163,58 @@ def test_query_confluence_vector_store_uses_encoder_and_manifest(tmp_path: Path)
     assert encoder.calls == [
         {
             "texts": ["Which chunk is about lead qualification?"],
+            "kwargs": {
+                "batch_size": 32,
+                "show_progress_bar": False,
+                "convert_to_numpy": True,
+                "normalize_embeddings": True,
+            },
+        }
+    ]
+
+
+def test_embed_confluence_query_returns_vector_and_manifest(tmp_path: Path) -> None:
+    embeddings_dir = tmp_path / "embeddings" / "confluence" / "ASA"
+    persist_dir = tmp_path / "vector-db"
+    embeddings_dir.mkdir(parents=True)
+
+    _write_embedding_records(
+        embeddings_dir / "overview-3178688.jsonl",
+        [
+            {
+                "chunk_id": "overview-3178688:001",
+                "page": "Overview",
+                "section": "Lead qualification",
+                "text": "The agent qualifies and prioritizes leads.",
+                "space_key": "ASA",
+                "embedding_model": "fake-embedding-model",
+                "embedding_dimensions": 2,
+                "embedding": [0.0, 1.0],
+            }
+        ],
+    )
+
+    build_confluence_vector_store(
+        input_dir=embeddings_dir.parent,
+        persist_dir=persist_dir,
+        collection_name="test-confluence",
+        backend="auto",
+    )
+
+    encoder = FakeEncoder({"How are leads qualified?": [0.6, 0.8]})
+    query_embedding, manifest = embed_confluence_query(
+        "How are leads qualified?",
+        persist_dir=persist_dir,
+        collection_name="test-confluence",
+        encoder=encoder,
+    )
+
+    assert query_embedding == [0.6, 0.8]
+    assert manifest.collection_name == "test-confluence"
+    assert manifest.embedding_model == "fake-embedding-model"
+    assert encoder.calls == [
+        {
+            "texts": ["How are leads qualified?"],
             "kwargs": {
                 "batch_size": 32,
                 "show_progress_bar": False,

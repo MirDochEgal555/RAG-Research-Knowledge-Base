@@ -156,6 +156,27 @@ python scripts\query_confluence_vector_store.py "What does the architecture say 
 python scripts\query_confluence_vector_store.py "How are leads qualified?" --model C:\models\all-MiniLM-L6-v2
 ```
 
+- The reusable Python API now exposes query embedding as a separate step, which is useful if you want to inspect or reuse the query vector before retrieval:
+
+```python
+from pathlib import Path
+
+from cortex_rag.retrieval import embed_confluence_query, search_confluence_vector_store_by_embedding
+
+query_embedding, manifest = embed_confluence_query(
+    "How are leads qualified?",
+    persist_dir=Path("storage/chroma"),
+    collection_name="confluence",
+)
+results = search_confluence_vector_store_by_embedding(
+    query_embedding,
+    top_k=3,
+    persist_dir=Path("storage/chroma"),
+    collection_name=manifest.collection_name,
+    backend=manifest.backend,
+)
+```
+
 ## Tools and Libraries
 - Embeddings: Sentence Transformers
 - Vector Store: Chroma or FAISS
@@ -179,6 +200,18 @@ pip install -r requirements-dev.txt
 ### Dependency Notes
 - `faiss-cpu` installs automatically on Python versions below 3.13.
 - `chromadb` is used automatically on Python 3.13 and newer as the vector store fallback.
+
+## Testing
+Run the test suite from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+Notes:
+- If the virtual environment is already activated, `pytest -q` also works.
+- Test discovery is limited to `tests/` via `pytest.ini`.
+- Temporary test directories are provided by `tests/conftest.py` under `scratch_pytest/` to avoid Windows temp-directory permission issues seen on some machines.
 
 ## Project Structure
 ```text
@@ -228,6 +261,7 @@ For an archive like `data/raw/confluence/ASA_2026-04-16.zip`, the script writes 
 - The chunking logic lives in `src/cortex_rag/ingestion/confluence_chunks.py`.
 - The embedding logic lives in `src/cortex_rag/retrieval/confluence_embeddings.py`.
 - The vector-store build and query logic lives in `src/cortex_rag/retrieval/vector_store.py`.
+- Query embedding is implemented as `embed_confluence_query(...)` so the question-to-vector step can be reused independently from the search call.
 - The ingestion and retrieval packages expose the current pipeline entry points.
 - HTML preprocessing and chunking use only the Python standard library.
 - Embedding generation and query embedding use `sentence-transformers`.

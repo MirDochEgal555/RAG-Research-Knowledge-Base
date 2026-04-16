@@ -1,5 +1,8 @@
 .venv/
 .tmp/
+.codex-pytest-temp/
+.pytest-tmp/
+tmp_pytest/
 scratch*/
 pytest-cache-files-*/
 __pycache__/
