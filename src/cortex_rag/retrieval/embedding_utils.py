@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+import os
+from pathlib import Path
 from typing import Any, Protocol
 
 
@@ -25,7 +27,34 @@ def load_sentence_transformer(*, model_name: str, device: str | None) -> TextEnc
     kwargs: dict[str, object] = {}
     if device:
         kwargs["device"] = device
-    return SentenceTransformer(model_name, **kwargs)
+    if _cached_hugging_face_model_dir(model_name) is not None:
+        kwargs["local_files_only"] = True
+    try:
+        return SentenceTransformer(model_name, **kwargs)
+    except Exception:
+        # When the model is already cached locally, a local-files-only retry keeps
+        # query-time embedding generation working even if network access is blocked.
+        offline_kwargs = dict(kwargs)
+        offline_kwargs["local_files_only"] = True
+        try:
+            return SentenceTransformer(model_name, **offline_kwargs)
+        except Exception as exc:
+            raise RuntimeError(
+                "Unable to load the embedding model. "
+                "Ensure the model is cached locally or pass a local model path."
+            ) from exc
+
+
+def _cached_hugging_face_model_dir(model_name: str) -> Path | None:
+    model_path = Path(model_name)
+    if model_path.exists():
+        return model_path
+    if "/" not in model_name:
+        return None
+
+    hf_home = Path(os.getenv("HF_HOME", Path.home() / ".cache" / "huggingface"))
+    cached_dir = hf_home / "hub" / f"models--{model_name.replace('/', '--')}"
+    return cached_dir if cached_dir.exists() else None
 
 
 def encode_texts(

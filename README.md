@@ -3,6 +3,9 @@
 ## Project Overview
 This project is a lightweight Retrieval-Augmented Generation (RAG) system that answers questions from a small local knowledge base. The current ingestion workflow is built around Confluence space exports in HTML format, zipped per space, then normalized into Markdown for later chunking, embedding, and retrieval.
 
+## Documentation
+- Production deployment planning: `docs/production-deployment.md`
+
 ## Current Knowledge Ingestion Process
 
 ### 1. Export Confluence Spaces
@@ -217,6 +220,42 @@ raw_results = similarity_search_confluence_vector_store_by_embedding(
 - The lower-level `similarity_search_confluence_vector_store(...)` APIs remain available when you want raw nearest-neighbor results without reranking or deduplication.
 - The older `query_confluence_vector_store(...)` and `search_confluence_vector_store_by_embedding(...)` names still work as compatibility aliases.
 
+### 9. Generate an Answer with Ollama
+- Run the end-to-end retrieval-plus-generation script after the vector store has been built:
+
+```powershell
+python scripts\ask_confluence.py "What does the architecture say about the execution layer?" --top-k 3
+```
+
+- The script:
+  - embeds the question with the vector store's configured embedding model
+  - retrieves reranked Confluence chunks
+  - builds a grounded prompt from `prompts/confluence_rag.md`
+  - sends the prompt to Ollama and prints the answer plus sources
+- Default Ollama settings can be overridden with environment variables:
+  - `OLLAMA_HOST`
+  - `OLLAMA_MODEL`
+  - `OLLAMA_NUM_CTX`
+  - `OLLAMA_TEMPERATURE`
+- You can also override them per run:
+- You can choose the answer style at runtime with `--mode`:
+
+```powershell
+python scripts\ask_confluence.py "How are leads qualified?" --mode technical
+python scripts\ask_confluence.py "Summarize the architecture" --mode bullet_summary
+```
+
+- You can also override them per run:
+
+```powershell
+python scripts\ask_confluence.py "How are leads qualified?" --ollama-model mistral:latest --num-ctx 4096 --temperature 0.1
+```
+
+Notes:
+- The repository currently defaults to `llama3.2:3b` for Ollama generation.
+- Query embedding retries from the local Hugging Face cache when network access is unavailable.
+- If the embedding model is not cached locally, pass a local model path with `--embedding-model`.
+
 ## Tools and Libraries
 - Embeddings: Sentence Transformers
 - Vector Store: Chroma or FAISS
@@ -269,7 +308,8 @@ CortexRAG/
 |   |-- chunk_confluence_exports.py
 |   |-- embed_confluence_chunks.py
 |   |-- build_confluence_vector_store.py
-|   `-- query_confluence_vector_store.py
+|   |-- query_confluence_vector_store.py
+|   `-- ask_confluence.py
 |-- src/
 |   `-- cortex_rag/
 |       |-- ingestion/    # Loading, preprocessing, and chunking
