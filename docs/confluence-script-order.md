@@ -11,7 +11,7 @@ Run the scripts in this order from the repository root:
 3. `python scripts\embed_confluence_chunks.py`
 4. `python scripts\build_confluence_vector_store.py`
 5. `python scripts\query_confluence_vector_store.py "<question>"`
-6. `python scripts\ask_confluence.py "<question>"`
+6. `python -m cortex_rag ask "<question>"`
 
 Only the first four steps are required to refresh the knowledge base. The last two are query-time commands.
 
@@ -144,7 +144,7 @@ python scripts\query_confluence_vector_store.py "How are leads qualified?" --mod
 Run:
 
 ```powershell
-python scripts\ask_confluence.py "What does the architecture say about the execution layer?"
+python -m cortex_rag ask "What does the architecture say about the execution layer?"
 ```
 
 Reads:
@@ -165,12 +165,16 @@ Use this when:
 Useful variants:
 
 ```powershell
-python scripts\ask_confluence.py "How are leads qualified?" --mode technical
-python scripts\ask_confluence.py "Summarize the architecture" --mode bullet_summary
-python scripts\ask_confluence.py "What does the architecture say?" --top-k 2 --num-ctx 4096 --max-tokens 80
-python scripts\ask_confluence.py "What does the architecture say?" --stream --max-tokens 80
-python scripts\ask_confluence.py "How are leads qualified?" --ollama-model mistral:latest --temperature 0.1
+python -m cortex_rag ask "How are leads qualified?" --mode technical
+python -m cortex_rag ask "Summarize the architecture" --mode bullet_summary
+python -m cortex_rag ask "What does the architecture say?" --top-k 2 --num-ctx 4096 --max-tokens 80
+python -m cortex_rag ask "What does the architecture say?" --stream --max-tokens 80
+python -m cortex_rag ask "How are leads qualified?" --ollama-model mistral:latest --temperature 0.1
 ```
+
+Compatibility note:
+
+- `scripts\ask_confluence.py` still works, but it now forwards directly to `python -m cortex_rag ask ...`.
 
 ## Refresh Scenarios
 
@@ -188,7 +192,7 @@ python scripts\build_confluence_vector_store.py
 Run only:
 
 ```powershell
-python scripts\ask_confluence.py "<question>"
+python -m cortex_rag ask "<question>"
 ```
 
 ### Retrieval looks wrong and you want to debug before generation
@@ -209,14 +213,14 @@ If you are setting up the repo on a fresh machine:
 6. run embeddings
 7. run vector-store build
 8. run a retrieval query
-9. run `ask_confluence.py` once Ollama is available
+9. run `python -m cortex_rag ask ...` once Ollama is available
 
 ## Common Mistakes
 - Running `chunk_confluence_exports.py` before preprocessing. There will be no Markdown input to chunk.
 - Running `build_confluence_vector_store.py` before embeddings exist. The build step will fail because there are no embedding records.
 - Changing the embedding model and then querying an old index without rebuilding it. Query vectors must match the manifest dimensions and model assumptions.
-- Expecting `ask_confluence.py` to work before the vector store exists.
-- Expecting `ask_confluence.py` to work if Ollama is not running or the configured model is missing.
+- Expecting `python -m cortex_rag ask ...` to work before the vector store exists.
+- Expecting `python -m cortex_rag ask ...` to work if Ollama is not running or the configured model is missing.
 
 ## Minimal Daily Commands
 To refresh the corpus:
@@ -231,5 +235,5 @@ python scripts\build_confluence_vector_store.py
 To ask a question afterward:
 
 ```powershell
-python scripts\ask_confluence.py "<question>"
+python -m cortex_rag ask "<question>"
 ```

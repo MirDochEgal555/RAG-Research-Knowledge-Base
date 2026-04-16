@@ -5,7 +5,18 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from cortex_rag.config import DEFAULT_VECTOR_COLLECTION, VECTOR_DB_DIR
+from cortex_rag.config import (
+    DEFAULT_OLLAMA_HOST,
+    DEFAULT_OLLAMA_MODEL,
+    DEFAULT_OLLAMA_NUM_CTX,
+    DEFAULT_OLLAMA_NUM_PREDICT,
+    DEFAULT_OLLAMA_TEMPERATURE,
+    DEFAULT_RAG_ANSWER_MODE,
+    DEFAULT_RAG_PROMPT_PATH,
+    DEFAULT_VECTOR_COLLECTION,
+    VECTOR_DB_DIR,
+)
+from cortex_rag.generation import answer_confluence_question
 from cortex_rag.retrieval import (
     SearchResult,
     build_confluence_vector_store,
@@ -97,6 +108,103 @@ def build_parser() -> argparse.ArgumentParser:
     )
     search_parser.set_defaults(handler=_run_similarity_search)
 
+    ask_parser = subparsers.add_parser(
+        "ask",
+        help="Retrieve Confluence context and generate a grounded answer with Ollama.",
+    )
+    ask_parser.add_argument("query", help="Question to answer from the Confluence vector store.")
+    ask_parser.add_argument(
+        "--candidate-k",
+        type=int,
+        default=10,
+        help="Number of raw retrieval candidates before reranking.",
+    )
+    ask_parser.add_argument(
+        "--top-k",
+        type=int,
+        default=2,
+        help="Number of reranked chunks to include in the prompt.",
+    )
+    ask_parser.add_argument(
+        "--min-score",
+        type=float,
+        default=None,
+        help="Optional minimum similarity score required for a chunk to be used.",
+    )
+    ask_parser.add_argument(
+        "--backend",
+        choices=("auto", "chroma", "faiss"),
+        default="auto",
+        help="Vector store backend. Defaults to the manifest backend when available.",
+    )
+    ask_parser.add_argument(
+        "--collection",
+        default=DEFAULT_VECTOR_COLLECTION,
+        help="Collection name to query.",
+    )
+    ask_parser.add_argument(
+        "--persist-dir",
+        type=Path,
+        default=VECTOR_DB_DIR,
+        help="Directory where the vector store files are persisted.",
+    )
+    ask_parser.add_argument(
+        "--embedding-model",
+        default=None,
+        help="Optional SentenceTransformer model name or local path override for query embedding.",
+    )
+    ask_parser.add_argument(
+        "--device",
+        default=None,
+        help="Optional SentenceTransformer device override, for example cpu or cuda.",
+    )
+    ask_parser.add_argument(
+        "--prompt",
+        type=Path,
+        default=DEFAULT_RAG_PROMPT_PATH,
+        help="Prompt template file used as the system message.",
+    )
+    ask_parser.add_argument(
+        "--mode",
+        choices=("concise", "normal", "detailed", "bullet_summary", "technical"),
+        default=DEFAULT_RAG_ANSWER_MODE,
+        help="Answer style injected into the prompt.",
+    )
+    ask_parser.add_argument(
+        "--ollama-host",
+        default=DEFAULT_OLLAMA_HOST,
+        help="Ollama host URL.",
+    )
+    ask_parser.add_argument(
+        "--ollama-model",
+        default=DEFAULT_OLLAMA_MODEL,
+        help="Ollama model name to use for answer generation.",
+    )
+    ask_parser.add_argument(
+        "--temperature",
+        type=float,
+        default=DEFAULT_OLLAMA_TEMPERATURE,
+        help="Generation temperature passed to Ollama.",
+    )
+    ask_parser.add_argument(
+        "--num-ctx",
+        type=int,
+        default=min(DEFAULT_OLLAMA_NUM_CTX, 4096),
+        help="Context window passed to Ollama.",
+    )
+    ask_parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=DEFAULT_OLLAMA_NUM_PREDICT,
+        help="Maximum number of tokens Ollama should generate.",
+    )
+    ask_parser.add_argument(
+        "--stream",
+        action="store_true",
+        help="Stream the answer as tokens arrive and report time to first token.",
+    )
+    ask_parser.set_defaults(handler=_run_ask)
+
     return parser
 
 
@@ -135,6 +243,51 @@ def _run_similarity_search(args: argparse.Namespace) -> None:
     _print_search_results(results)
 
 
+def _run_ask(args: argparse.Namespace) -> None:
+    if args.stream:
+        print("Answer:")
+
+    result = answer_confluence_question(
+        args.query,
+        candidate_k=args.candidate_k,
+        top_k=args.top_k,
+        min_score=args.min_score,
+        backend=args.backend,
+        collection_name=args.collection,
+        persist_dir=args.persist_dir,
+        embedding_model=args.embedding_model,
+        device=args.device,
+        prompt_path=args.prompt,
+        answer_mode=args.mode,
+        ollama_host=args.ollama_host,
+        ollama_model=args.ollama_model,
+        temperature=args.temperature,
+        num_ctx=args.num_ctx,
+        max_tokens=args.max_tokens,
+        stream=args.stream,
+        token_callback=_stream_token if args.stream else None,
+    )
+
+    if not result.sources:
+        print("No relevant context was found. Ollama was not called.")
+        print()
+        _print_timings(result.timings)
+        return
+
+    if not args.stream:
+        print("Answer:")
+        print(result.answer)
+        print()
+    else:
+        print()
+        print()
+
+    print("Sources:")
+    _print_search_results(result.sources)
+    print()
+    _print_timings(result.timings)
+
+
 def _print_search_results(results: list[SearchResult]) -> None:
     for index, result in enumerate(results, start=1):
         page = result.metadata.get("page", "")
@@ -143,6 +296,25 @@ def _print_search_results(results: list[SearchResult]) -> None:
         if page or section:
             print(f"   {page} :: {section}".rstrip(" :"))
         print(f"   {result.text[:240].replace(chr(10), ' ')}")
+
+
+def _print_timings(timings: object) -> None:
+    print("Timings:")
+    print(f"embedding: {_format_duration(getattr(timings, 'embedding_seconds'))}")
+    print(f"retrieval: {_format_duration(getattr(timings, 'retrieval_seconds'))}")
+    first_token_seconds = getattr(timings, "first_token_seconds")
+    if first_token_seconds is not None:
+        print(f"first_token: {_format_duration(first_token_seconds)}")
+    print(f"generation: {_format_duration(getattr(timings, 'generation_seconds'))}")
+    print(f"total: {_format_duration(getattr(timings, 'total_seconds'))}")
+
+
+def _format_duration(seconds: float) -> str:
+    return f"{seconds:.2f}s"
+
+
+def _stream_token(token: str) -> None:
+    print(token, end="", flush=True)
 
 
 if __name__ == "__main__":

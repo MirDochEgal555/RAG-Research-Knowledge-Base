@@ -3,7 +3,7 @@
 ## Purpose
 This document describes the full end-to-end workflow in CortexRAG: what each stage reads, what it writes, how the data shape changes, and what happens when a user asks a question.
 
-The current pipeline is optimized for Confluence HTML space exports stored locally and answered through a local Ollama model.
+The current pipeline is optimized for Confluence HTML space exports stored locally and answered through a local Ollama model. The primary query-time entry point is now `python -m cortex_rag ask ...`, with `scripts/ask_confluence.py` retained only as a compatibility wrapper.
 
 ## Workflow Summary
 The repository turns Confluence exports into a grounded answer in six stages:
@@ -302,15 +302,16 @@ Results are filtered for near duplicates by:
 Default trimmed result count:
 
 - `5` for general retrieval
-- `2` inside `scripts/ask_confluence.py` before prompt construction
+- `2` for `python -m cortex_rag ask ...` before prompt construction
 
 ## Stage 7: Prompt Construction
 Entry point:
 
-- called from `scripts/ask_confluence.py`
+- called from `src/cortex_rag/generation/confluence_answering.py`
 
 Implementation:
 
+- `src/cortex_rag/generation/confluence_answering.py`
 - `src/cortex_rag/generation/prompting.py`
 
 What happens:
@@ -345,20 +346,24 @@ Each retrieved chunk in the prompt includes:
 ## Stage 8: Answer Generation with Ollama
 Entry point:
 
-- `scripts/ask_confluence.py`
+- `python -m cortex_rag ask ...`
+- `scripts/ask_confluence.py` as a thin wrapper over the package CLI
 
 Implementation:
 
+- `src/cortex_rag/cli.py`
+- `src/cortex_rag/generation/confluence_answering.py`
 - `src/cortex_rag/generation/ollama_client.py`
 
 What happens:
 
-1. the script embeds the query
-2. it retrieves and reranks context chunks
-3. it stops early if no relevant chunks survive retrieval
-4. it builds the final RAG chat messages
-5. it calls Ollama through the Python client
-6. it prints the answer, sources, and timing breakdown
+1. the CLI calls `answer_confluence_question(...)`
+2. the package embeds the query
+3. it retrieves and reranks context chunks
+4. it stops early if no relevant chunks survive retrieval
+5. it builds the final RAG chat messages
+6. it calls Ollama through the Python client
+7. the CLI prints the answer, sources, and timing breakdown
 
 Default generation settings come from `src/cortex_rag/config.py` and environment variables:
 
@@ -374,7 +379,7 @@ Streaming behavior:
 - `--stream` prints tokens as they arrive
 - time to first token is measured separately from total generation time
 
-Timing breakdown reported by the script:
+Timing breakdown reported by the CLI:
 
 - embedding
 - retrieval
@@ -423,7 +428,7 @@ Flow:
 - Embedding-model downloads may require network access on the first run.
 - Query embeddings must match the dimensions recorded in the vector-store manifest.
 - The in-process SentenceTransformer cache only helps long-lived Python processes, not separate one-shot script runs.
-- `scripts/ask_confluence.py` does not call Ollama if retrieval returns no usable context.
+- `answer_confluence_question(...)` does not call Ollama if retrieval returns no usable context.
 - Rebuilding the vector store replaces the existing collection for the selected name.
 
 ## Relevant Code
@@ -431,6 +436,8 @@ Flow:
 - chunking: `src/cortex_rag/ingestion/confluence_chunks.py`
 - embeddings: `src/cortex_rag/retrieval/confluence_embeddings.py`
 - vector store and retrieval: `src/cortex_rag/retrieval/vector_store.py`
+- end-to-end answer flow: `src/cortex_rag/generation/confluence_answering.py`
 - prompt building: `src/cortex_rag/generation/prompting.py`
 - Ollama client: `src/cortex_rag/generation/ollama_client.py`
-- answer script: `scripts/ask_confluence.py`
+- CLI entry points: `src/cortex_rag/cli.py`
+- compatibility wrapper: `scripts/ask_confluence.py`

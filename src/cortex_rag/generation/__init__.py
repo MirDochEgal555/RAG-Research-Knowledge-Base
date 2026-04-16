@@ -1,5 +1,10 @@
 """Local LLM response generation components."""
 
+from cortex_rag.generation.confluence_answering import (
+    AnswerTimings,
+    ConfluenceAnswerResult,
+    answer_confluence_question,
+)
 from cortex_rag.generation.ollama_client import GenerationResult, chat_with_ollama
 from cortex_rag.generation.prompting import (
     AnswerMode,
@@ -11,7 +16,10 @@ from cortex_rag.generation.prompting import (
 
 __all__ = [
     "AnswerMode",
+    "AnswerTimings",
+    "ConfluenceAnswerResult",
     "GenerationResult",
+    "answer_confluence_question",
     "build_confluence_rag_messages",
     "chat_with_ollama",
     "format_retrieval_context",

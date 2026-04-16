@@ -20,12 +20,12 @@ The repository already supports the retrieval side of the pipeline:
 - embedding generation under `storage/embeddings/`
 - persistent vector store creation under `storage/chroma/`
 - context retrieval via `scripts/query_confluence_vector_store.py`
-- end-to-end retrieval plus generation via `scripts/ask_confluence.py`
+- end-to-end retrieval plus generation via `python -m cortex_rag ask ...`
 
 The repository also includes a local Ollama integration path. Production planning should assume:
 
 - Ollama will be the local inference runtime
-- generation code should live behind a small adapter in `src/cortex_rag/generation/`
+- generation code already lives behind a small adapter in `src/cortex_rag/generation/`
 - runtime configuration should come from environment variables or a small config layer
 - query-time embedding models should be preloaded inside a long-lived process to avoid repeated cold starts
 
@@ -362,8 +362,8 @@ Before first production rollout:
 ## Recommended Rollout Sequence
 Use this sequence when you are ready to productionize.
 
-1. Implement the generation adapter and configuration layer locally.
-2. Add a single end-to-end `ask` command or API path.
+1. Keep the package-level generation adapter and CLI path stable locally.
+2. Add a single API path on top of the existing `ask` flow when ready.
 3. Test the full local flow against Ollama.
 4. Decide whether artifacts are built locally, in CI, or on the server.
 5. Provision the server directories and service user.
@@ -390,7 +390,7 @@ If artifacts are shipped separately, version them so you can restore a known-goo
 To make the repository production-ready, the next code changes should be:
 
 1. add a `.env.example`
-2. add a long-lived API or app process that preloads the embedding model at startup
+2. add a long-lived API or app process that wraps `answer_confluence_question(...)` and preloads the embedding model at startup
 3. add deployment scripts or service examples once the runtime interface is stable
 4. add request-level logging and timing around retrieval and generation
 5. tighten retrieval quality so fewer irrelevant chunks reach the prompt

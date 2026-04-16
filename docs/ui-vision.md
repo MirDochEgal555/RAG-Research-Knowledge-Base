@@ -353,3 +353,69 @@ Build this **layer by layer**:
 A fully local, interactive, explainable AI system that feels like:
 
 > **exploring your own brain**
+
+---
+
+## Next TODOs
+
+The current repo is still in Phase 1: ingestion, embeddings, vector search, and a CLI/scripted answer flow exist, but there is no API server or frontend yet. The next work should stay narrow and produce a usable UI slice quickly.
+
+### 1. Close out the current RAG surface
+
+- Done: `src/cortex_rag/cli.py` now exposes a first-class `ask` command, and `scripts/ask_confluence.py` is only a thin compatibility wrapper.
+- Done: the package now returns structured answer data from `src/cortex_rag/generation/confluence_answering.py`, including answer text, retrieved chunks, timings, and model metadata.
+- Done: tests cover the package-level answer flow and CLI so a future web layer can call stable Python functions instead of shelling out to scripts.
+
+### 2. Add a thin backend for the UI
+
+- Create a small FastAPI app under `src/cortex_rag/api/`.
+- Start with four endpoints: `/health`, `/search`, `/answer`, and `/graph/neighborhood`.
+- Keep the API read-only for now. It should expose existing retrieval results as JSON, not invent a full graph database.
+- Add request/response schemas for search results, answer payloads, and graph nodes/edges.
+
+### 3. Define the MVP graph model
+
+- Start with only two node types: `document` and `chunk`.
+- Start with only two edge types: `belongs_to` and `similar_to`.
+- Build `document -> chunk` links from existing chunk metadata.
+- Build `chunk <-> chunk` similarity edges from embedding search or an offline nearest-neighbor pass.
+- Persist graph-ready JSON alongside the vector store so the frontend can render without expensive recomputation on every request.
+
+### 4. Build Version 1 of the UI
+
+- Scaffold a React + TypeScript frontend.
+- Use Cytoscape.js first; it fits the current graph vision without forcing a custom rendering engine too early.
+- Implement the initial layout from this doc:
+  - center graph canvas
+  - right detail panel
+  - bottom query bar
+- Keep the first visual pass simple: dark canvas, highlighted result nodes, basic pan/zoom/drag, no advanced animation yet.
+
+### 5. Ship the first useful interaction loop
+
+- Query submission calls `/search` and highlights the top matching document/chunk nodes.
+- Clicking a node opens the detail panel with summary text, source page, section, and related nodes.
+- The answer view calls `/answer` and shows both the response and the retrieved sources used to produce it.
+- Add a mode toggle only after Graph Mode works; do not split effort across Chat Mode and Document Explorer yet.
+
+### 6. Add explainability before polish
+
+- Include retrieval scores and source metadata in the UI instead of hiding them.
+- Render the query result path as a selected subgraph rather than animating the whole canvas.
+- Capture why an edge exists: same document, nearest-neighbor similarity, or shared metadata.
+- Defer "brain-like" animations until the static explainability layer is clear and debuggable.
+
+### 7. Keep scope under control
+
+- Do not introduce Neo4j yet.
+- Do not model entities/topics until document/chunk nodes are stable.
+- Do not build Timeline Mode in the first UI pass.
+- Do not spend time on fancy motion until search, selection, and answer grounding are reliable.
+
+### Suggested implementation order
+
+1. Add FastAPI endpoints on top of retrieval and generation.
+2. Generate graph JSON for document/chunk nodes and edges.
+3. Build the React graph shell and wire it to `/search`.
+4. Add the detail panel and answer panel.
+5. Add query-path highlighting and small visual polish.

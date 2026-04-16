@@ -31,9 +31,18 @@ Put Confluence HTML export zip files in `data/raw/confluence/`, then run:
 python scripts\preprocess_confluence_exports.py
 python scripts\chunk_confluence_exports.py
 python scripts\embed_confluence_chunks.py
-python scripts\build_confluence_vector_store.py
-python scripts\ask_confluence.py "What does the architecture say about the execution layer?"
+python -m cortex_rag build-vector-store
+python -m cortex_rag ask "What does the architecture say about the execution layer?"
 ```
+
+The package CLI is now the primary query-time interface:
+
+```powershell
+python -m cortex_rag similarity-search "How are leads qualified?"
+python -m cortex_rag ask "How are leads qualified?" --mode technical
+```
+
+`scripts\ask_confluence.py` still exists as a compatibility wrapper, but new usage should go through `python -m cortex_rag ...`.
 
 ## Testing
 Run the test suite from the repository root:

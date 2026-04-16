@@ -4,6 +4,7 @@
 The test suite covers the current Confluence ingestion, retrieval, and generation helpers. The most failure-prone edge cases around the local generation path are covered in:
 
 - `tests/test_generation.py`
+- `tests/test_confluence_answering.py`
 - `tests/test_cli.py`
 - `tests/test_ask_confluence.py`
 
@@ -12,10 +13,11 @@ These tests specifically lock down:
 - missing and empty prompt templates
 - blank user questions rejected before prompt construction
 - retrieved chunks with missing metadata
-- empty retrieval results returned to the end-to-end ask script
+- empty retrieval results returned to the package-level answer flow
 - streaming Ollama responses that never yield any content
 - CLI output when page and section metadata are absent
 - timing output when no first-token latency is available
+- the legacy ask script remaining a thin wrapper over the package CLI
 
 ## Run Commands
 Run the full suite from the repository root:
@@ -27,7 +29,7 @@ Run the full suite from the repository root:
 Run only the generation and CLI edge-case coverage:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest -q tests\test_generation.py tests\test_cli.py tests\test_ask_confluence.py
+.\.venv\Scripts\python.exe -m pytest -q tests\test_generation.py tests\test_confluence_answering.py tests\test_cli.py tests\test_ask_confluence.py
 ```
 
 ## Notes
