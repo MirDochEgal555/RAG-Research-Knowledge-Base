@@ -2,24 +2,19 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
 import json
 from pathlib import Path
-from typing import Any, Protocol
 
 from cortex_rag.config import CHUNKS_DIR, DEFAULT_EMBEDDING_MODEL, EMBEDDINGS_DIR
+from cortex_rag.retrieval.embedding_utils import (
+    TextEncoder,
+    encode_texts,
+    load_sentence_transformer,
+)
 
 
 CONFLUENCE_CHUNKS_DIR = CHUNKS_DIR / "confluence"
 CONFLUENCE_EMBEDDINGS_DIR = EMBEDDINGS_DIR / "confluence"
-
-
-class TextEncoder(Protocol):
-    """Minimal protocol for sentence embedding backends."""
-
-    def encode(self, texts: Sequence[str], **kwargs: object) -> Any:
-        """Return one vector per input text."""
-
 
 def generate_confluence_embeddings(
     input_dir: Path = CONFLUENCE_CHUNKS_DIR,
@@ -43,7 +38,7 @@ def generate_confluence_embeddings(
     embedding_model = model_name
     active_encoder = encoder
     if active_encoder is None:
-        active_encoder = _load_sentence_transformer(model_name=model_name, device=device)
+        active_encoder = load_sentence_transformer(model_name=model_name, device=device)
     embedding_model = str(getattr(active_encoder, "model_name_or_path", model_name))
 
     for space_dir in sorted(path for path in input_dir.iterdir() if path.is_dir()):
@@ -81,7 +76,7 @@ def generate_confluence_space_embeddings(
     if not chunk_paths:
         return []
 
-    active_encoder = encoder or _load_sentence_transformer(model_name=model_name, device=None)
+    active_encoder = encoder or load_sentence_transformer(model_name=model_name, device=None)
     embedding_model = str(getattr(active_encoder, "model_name_or_path", model_name))
 
     space_output_dir = output_dir / space_dir.name
@@ -91,7 +86,7 @@ def generate_confluence_space_embeddings(
     for chunk_path in chunk_paths:
         chunks = _load_chunk_records(chunk_path)
         texts = [str(chunk.get("text", "")) for chunk in chunks]
-        vectors = _encode_texts(
+        vectors = encode_texts(
             active_encoder,
             texts,
             batch_size=batch_size,
@@ -115,22 +110,6 @@ def generate_confluence_space_embeddings(
 
     return output_paths
 
-
-def _load_sentence_transformer(*, model_name: str, device: str | None) -> TextEncoder:
-    try:
-        from sentence_transformers import SentenceTransformer
-    except ImportError as exc:
-        raise RuntimeError(
-            "sentence-transformers is required to generate embeddings. "
-            "Install project dependencies before running this step."
-        ) from exc
-
-    kwargs: dict[str, object] = {}
-    if device:
-        kwargs["device"] = device
-    return SentenceTransformer(model_name, **kwargs)
-
-
 def _load_chunk_records(path: Path) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -142,46 +121,3 @@ def _load_chunk_records(path: Path) -> list[dict[str, object]]:
             raise ValueError(f"Chunk file contains a non-object record: {path}")
         records.append(payload)
     return records
-
-
-def _encode_texts(
-    encoder: TextEncoder,
-    texts: Sequence[str],
-    *,
-    batch_size: int,
-    normalize_embeddings: bool,
-) -> list[list[float]]:
-    if not texts:
-        return []
-
-    try:
-        encoded = encoder.encode(
-            texts,
-            batch_size=batch_size,
-            show_progress_bar=False,
-            convert_to_numpy=True,
-            normalize_embeddings=normalize_embeddings,
-        )
-    except TypeError:
-        encoded = encoder.encode(
-            texts,
-            batch_size=batch_size,
-            normalize_embeddings=normalize_embeddings,
-        )
-
-    vectors = [_vector_to_list(vector) for vector in encoded]
-    if len(vectors) != len(texts):
-        raise ValueError("Encoder returned a different number of vectors than input texts.")
-    return vectors
-
-
-def _vector_to_list(vector: object) -> list[float]:
-    if hasattr(vector, "tolist"):
-        values = vector.tolist()
-    else:
-        values = vector
-
-    if not isinstance(values, Iterable) or isinstance(values, (str, bytes)):
-        raise TypeError("Embedding vector is not iterable.")
-
-    return [float(value) for value in values]

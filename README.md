@@ -110,9 +110,55 @@ Notes:
 - The first run may download the selected SentenceTransformer model unless it is already cached locally.
 - If the machine is offline, pass a local model path to `--model`.
 
+### 7. Build the Persistent Vector Store
+- Run the vector-store build step after embeddings have been generated:
+
+```powershell
+python scripts\build_confluence_vector_store.py
+```
+
+- The script scans `storage/embeddings/confluence/`.
+- It creates or replaces a persistent `confluence` collection under `storage/chroma/`.
+- By default the project uses:
+  - `chroma` on Python `3.13+`
+  - `faiss` when Chroma is unavailable and FAISS is installed
+- You can override the backend, collection name, or output directory:
+
+```powershell
+python scripts\build_confluence_vector_store.py --backend chroma
+python scripts\build_confluence_vector_store.py --backend faiss --collection asa-dev
+```
+
+- A manifest file is written alongside the index so the query step can reuse the same backend and embedding dimensions:
+
+```json
+{
+  "backend": "chroma",
+  "collection_name": "confluence",
+  "document_count": 57,
+  "embedding_dimensions": 384,
+  "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
+  "distance_metric": "cosine"
+}
+```
+
+### 8. Query the Vector Store
+- Run a retrieval-only query against the built store:
+
+```powershell
+python scripts\query_confluence_vector_store.py "What does the architecture say about the execution layer?" --top-k 3
+```
+
+- The query script embeds the question with the same embedding model recorded in the manifest unless you override it.
+- If the model is not cached locally and the machine is offline, pass a local model path:
+
+```powershell
+python scripts\query_confluence_vector_store.py "How are leads qualified?" --model C:\models\all-MiniLM-L6-v2
+```
+
 ## Tools and Libraries
 - Embeddings: Sentence Transformers
-- Vector Store: FAISS (or similar)
+- Vector Store: Chroma or FAISS
 - Local LLM: LLaMA/Mistral (via Ollama/LM Studio)
 
 ## Python Environment
@@ -148,7 +194,9 @@ CortexRAG/
 |-- scripts/              # Helper scripts for ingestion or maintenance
 |   |-- preprocess_confluence_exports.py
 |   |-- chunk_confluence_exports.py
-|   `-- embed_confluence_chunks.py
+|   |-- embed_confluence_chunks.py
+|   |-- build_confluence_vector_store.py
+|   `-- query_confluence_vector_store.py
 |-- src/
 |   `-- cortex_rag/
 |       |-- ingestion/    # Loading, preprocessing, and chunking
@@ -159,7 +207,7 @@ CortexRAG/
 |       `-- config.py
 |-- storage/
 |   |-- embeddings/       # Embedded chunk JSONL files
-|   `-- chroma/           # Local vector database files
+|   `-- chroma/           # Persistent Chroma or FAISS-backed vector-store files
 `-- tests/                # Automated tests
 ```
 
@@ -172,18 +220,23 @@ For an archive like `data/raw/confluence/ASA_2026-04-16.zip`, the script writes 
 - `data/chunks/confluence/ASA/architecture-3309569.jsonl`
 - `storage/embeddings/confluence/ASA/overview-3178688.jsonl`
 - `storage/embeddings/confluence/ASA/architecture-3309569.jsonl`
+- `storage/chroma/confluence.manifest.json`
+- `storage/chroma/chroma.sqlite3`
 
 ## Implementation Notes
 - The preprocessing logic lives in `src/cortex_rag/ingestion/confluence_html.py`.
 - The chunking logic lives in `src/cortex_rag/ingestion/confluence_chunks.py`.
 - The embedding logic lives in `src/cortex_rag/retrieval/confluence_embeddings.py`.
+- The vector-store build and query logic lives in `src/cortex_rag/retrieval/vector_store.py`.
 - The ingestion and retrieval packages expose the current pipeline entry points.
-- HTML preprocessing and chunking use only the Python standard library; embedding generation uses `sentence-transformers`.
+- HTML preprocessing and chunking use only the Python standard library.
+- Embedding generation and query embedding use `sentence-transformers`.
+- Vector-store persistence uses Chroma when available and falls back to FAISS when requested.
 
 ## Next Steps
 1. Keep raw Confluence exports in `data/raw/confluence/`.
 2. Re-run preprocessing whenever a new export is added.
 3. Re-run chunk generation from `data/processed/confluence/`.
 4. Re-run embedding generation from `data/chunks/confluence/`.
-5. Load embedded chunks into the vector store.
-6. Connect retrieval output to the local generation pipeline.
+5. Rebuild the vector store from `storage/embeddings/confluence/`.
+6. Feed top-k retrieval results into the local generation pipeline.
