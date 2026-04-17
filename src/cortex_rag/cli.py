@@ -17,6 +17,7 @@ from cortex_rag.config import (
     VECTOR_DB_DIR,
 )
 from cortex_rag.generation import answer_confluence_question
+from cortex_rag.graph import build_confluence_graph
 from cortex_rag.retrieval import (
     SearchResult,
     build_confluence_vector_store,
@@ -51,7 +52,53 @@ def build_parser() -> argparse.ArgumentParser:
         default=VECTOR_DB_DIR,
         help="Directory where the vector store files should be persisted.",
     )
+    build_parser.add_argument(
+        "--with-graph",
+        action="store_true",
+        help="Also build the persisted document/chunk graph artifact alongside the vector store.",
+    )
+    build_parser.add_argument(
+        "--graph-similarity-top-k",
+        type=int,
+        default=3,
+        help="Number of similar chunk neighbors to persist per chunk when building the graph artifact.",
+    )
+    build_parser.add_argument(
+        "--graph-similarity-threshold",
+        type=float,
+        default=0.6,
+        help="Minimum cosine similarity required for a persisted chunk-to-chunk similarity edge.",
+    )
     build_parser.set_defaults(handler=_run_build_vector_store)
+
+    graph_parser = subparsers.add_parser(
+        "build-graph",
+        help="Build or replace the persisted document/chunk graph artifact for the UI backend.",
+    )
+    graph_parser.add_argument(
+        "--collection",
+        default=DEFAULT_VECTOR_COLLECTION,
+        help="Persistent collection name whose graph artifact should be built.",
+    )
+    graph_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=VECTOR_DB_DIR,
+        help="Directory where the graph artifact should be persisted.",
+    )
+    graph_parser.add_argument(
+        "--similarity-top-k",
+        type=int,
+        default=3,
+        help="Number of similar chunk neighbors to persist per chunk.",
+    )
+    graph_parser.add_argument(
+        "--similarity-threshold",
+        type=float,
+        default=0.6,
+        help="Minimum cosine similarity required for a persisted chunk-to-chunk similarity edge.",
+    )
+    graph_parser.set_defaults(handler=_run_build_graph)
 
     search_parser = subparsers.add_parser(
         "similarity-search",
@@ -225,6 +272,30 @@ def _run_build_vector_store(args: argparse.Namespace) -> None:
     print(
         f"Built {result.backend} vector store '{result.collection_name}' "
         f"with {result.document_count} chunks at {result.persist_dir}."
+    )
+    if args.with_graph:
+        graph_result = build_confluence_graph(
+            persist_dir=args.output_dir,
+            collection_name=args.collection,
+            similarity_top_k=args.graph_similarity_top_k,
+            similarity_threshold=args.graph_similarity_threshold,
+        )
+        print(
+            f"Built graph '{graph_result.collection_name}' with {graph_result.node_count} nodes "
+            f"and {graph_result.edge_count} edges at {graph_result.persist_path}."
+        )
+
+
+def _run_build_graph(args: argparse.Namespace) -> None:
+    result = build_confluence_graph(
+        persist_dir=args.output_dir,
+        collection_name=args.collection,
+        similarity_top_k=args.similarity_top_k,
+        similarity_threshold=args.similarity_threshold,
+    )
+    print(
+        f"Built graph '{result.collection_name}' with {result.node_count} nodes "
+        f"and {result.edge_count} edges at {result.persist_path}."
     )
 
 

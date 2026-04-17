@@ -153,6 +153,7 @@ def test_graph_neighborhood_endpoint_returns_nodes_and_edges(monkeypatch) -> Non
     from fastapi.testclient import TestClient
 
     from cortex_rag.api import app as api_app
+    from cortex_rag.graph import GraphArtifact, GraphEdge, GraphNode
     from cortex_rag.retrieval import SearchResult
 
     def fake_retrieve_context(query: str, **kwargs: object) -> list[SearchResult]:
@@ -180,7 +181,66 @@ def test_graph_neighborhood_endpoint_returns_nodes_and_edges(monkeypatch) -> Non
             ),
         ]
 
+    def fake_load_graph(*, persist_dir, collection_name):
+        assert collection_name == "confluence"
+        return GraphArtifact(
+            collection_name="confluence",
+            document_node_count=1,
+            chunk_node_count=2,
+            belongs_to_edge_count=2,
+            similar_to_edge_count=1,
+            similarity_top_k=3,
+            similarity_threshold=0.6,
+            nodes=[
+                GraphNode(
+                    id="document::ASA/architecture-3309569.md",
+                    type="document",
+                    label="Architecture",
+                    metadata={"page": "Architecture"},
+                ),
+                GraphNode(
+                    id="chunk::architecture-3309569:001",
+                    type="chunk",
+                    label="Execution layer",
+                    metadata={"chunk_id": "architecture-3309569:001"},
+                ),
+                GraphNode(
+                    id="chunk::architecture-3309569:002",
+                    type="chunk",
+                    label="Orchestration",
+                    metadata={"chunk_id": "architecture-3309569:002"},
+                ),
+            ],
+            edges=[
+                GraphEdge(
+                    id="document::ASA/architecture-3309569.md--chunk::architecture-3309569:001::belongs_to",
+                    source="document::ASA/architecture-3309569.md",
+                    target="chunk::architecture-3309569:001",
+                    type="belongs_to",
+                    weight=1.0,
+                    metadata={"reason": "chunk_source_membership"},
+                ),
+                GraphEdge(
+                    id="document::ASA/architecture-3309569.md--chunk::architecture-3309569:002::belongs_to",
+                    source="document::ASA/architecture-3309569.md",
+                    target="chunk::architecture-3309569:002",
+                    type="belongs_to",
+                    weight=1.0,
+                    metadata={"reason": "chunk_source_membership"},
+                ),
+                GraphEdge(
+                    id="chunk::architecture-3309569:001--chunk::architecture-3309569:002::similar_to",
+                    source="chunk::architecture-3309569:001",
+                    target="chunk::architecture-3309569:002",
+                    type="similar_to",
+                    weight=0.88,
+                    metadata={"reason": "embedding_similarity"},
+                ),
+            ],
+        )
+
     monkeypatch.setattr(api_app, "retrieve_confluence_context", fake_retrieve_context)
+    monkeypatch.setattr(api_app, "load_confluence_graph", fake_load_graph)
     client = TestClient(api_app.create_app())
 
     response = client.post("/graph/neighborhood", json={"query": "What changed?"})

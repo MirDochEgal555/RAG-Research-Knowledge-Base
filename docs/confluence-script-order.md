@@ -10,10 +10,11 @@ Run the scripts in this order from the repository root:
 2. `python scripts\chunk_confluence_exports.py`
 3. `python scripts\embed_confluence_chunks.py`
 4. `python scripts\build_confluence_vector_store.py`
-5. `python scripts\query_confluence_vector_store.py "<question>"`
-6. `python -m cortex_rag ask "<question>"`
+5. `python scripts\build_confluence_graph.py`
+6. `python scripts\query_confluence_vector_store.py "<question>"`
+7. `python -m cortex_rag ask "<question>"`
 
-Only the first four steps are required to refresh the knowledge base. The last two are query-time commands.
+Only the first five steps are required to refresh the knowledge base for the graph UI. The last two are query-time commands.
 
 ## What Each Script Expects and Produces
 
@@ -109,9 +110,38 @@ Useful variants:
 python scripts\build_confluence_vector_store.py --backend chroma
 python scripts\build_confluence_vector_store.py --backend faiss
 python scripts\build_confluence_vector_store.py --collection asa-dev
+python -m cortex_rag build-vector-store --with-graph
 ```
 
-### 5. Inspect retrieval results
+### 5. Build the persisted graph artifact
+Run:
+
+```powershell
+python scripts\build_confluence_graph.py
+```
+
+Reads:
+
+- `storage/embeddings/confluence/**/*.jsonl`
+
+Writes:
+
+- `storage/chroma/confluence.graph.json`
+
+Use this when:
+
+- you want the UI backend to serve document/chunk neighborhoods without recomputing edges on every request
+- the embeddings changed and the graph needs to stay aligned with the vector store
+
+Useful variants:
+
+```powershell
+python scripts\build_confluence_graph.py --similarity-top-k 5
+python scripts\build_confluence_graph.py --similarity-threshold 0.7
+python -m cortex_rag build-graph --collection asa-dev
+```
+
+### 6. Inspect retrieval results
 Run:
 
 ```powershell
@@ -140,7 +170,7 @@ python scripts\query_confluence_vector_store.py "How are leads qualified?" --min
 python scripts\query_confluence_vector_store.py "How are leads qualified?" --model C:\models\all-MiniLM-L6-v2
 ```
 
-### 6. Ask a full RAG question
+### 7. Ask a full RAG question
 Run:
 
 ```powershell
@@ -186,6 +216,7 @@ python scripts\preprocess_confluence_exports.py
 python scripts\chunk_confluence_exports.py
 python scripts\embed_confluence_chunks.py
 python scripts\build_confluence_vector_store.py
+python scripts\build_confluence_graph.py
 ```
 
 ### No content change, just ask a question
@@ -212,13 +243,16 @@ If you are setting up the repo on a fresh machine:
 5. run chunking
 6. run embeddings
 7. run vector-store build
-8. run a retrieval query
-9. run `python -m cortex_rag ask ...` once Ollama is available
+8. run graph build
+9. run a retrieval query
+10. run `python -m cortex_rag ask ...` once Ollama is available
 
 ## Common Mistakes
 - Running `chunk_confluence_exports.py` before preprocessing. There will be no Markdown input to chunk.
 - Running `build_confluence_vector_store.py` before embeddings exist. The build step will fail because there are no embedding records.
+- Running the graph UI without building `confluence.graph.json`. `/graph/neighborhood` depends on the persisted graph artifact.
 - Changing the embedding model and then querying an old index without rebuilding it. Query vectors must match the manifest dimensions and model assumptions.
+- Changing embeddings or chunk boundaries and forgetting to rebuild the graph artifact. The graph should track the same chunk corpus as the vector store.
 - Expecting `python -m cortex_rag ask ...` to work before the vector store exists.
 - Expecting `python -m cortex_rag ask ...` to work if Ollama is not running or the configured model is missing.
 
@@ -230,6 +264,7 @@ python scripts\preprocess_confluence_exports.py
 python scripts\chunk_confluence_exports.py
 python scripts\embed_confluence_chunks.py
 python scripts\build_confluence_vector_store.py
+python scripts\build_confluence_graph.py
 ```
 
 To ask a question afterward:

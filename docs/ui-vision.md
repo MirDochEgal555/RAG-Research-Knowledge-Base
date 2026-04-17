@@ -375,11 +375,11 @@ The current repo is still in Phase 1: ingestion, embeddings, vector search, a pa
 
 ### 3. Define the MVP graph model
 
-- Start with only two node types: `document` and `chunk`.
-- Start with only two edge types: `belongs_to` and `similar_to`.
-- Build `document -> chunk` links from existing chunk metadata.
-- Build `chunk <-> chunk` similarity edges from embedding search or an offline nearest-neighbor pass.
-- Persist graph-ready JSON alongside the vector store so the frontend can render without expensive recomputation on every request.
+- Done: the graph now starts with two node types, `document` and `chunk`.
+- Done: the graph now starts with two edge types, `belongs_to` and `similar_to`.
+- Done: `document -> chunk` links are built from existing chunk metadata.
+- Done: `chunk <-> chunk` similarity edges are built offline from embedding cosine similarity.
+- Done: graph-ready JSON is persisted alongside the vector store as `storage/chroma/<collection>.graph.json`.
 
 ### 4. Build Version 1 of the UI
 
@@ -414,7 +414,6 @@ The current repo is still in Phase 1: ingestion, embeddings, vector search, a pa
 
 ### Suggested implementation order
 
-1. Generate graph JSON for document/chunk nodes and edges.
-2. Build the React graph shell and wire it to `/search`.
-3. Add the detail panel and answer panel.
-4. Add query-path highlighting and small visual polish.
+1. Build the React graph shell and wire it to `/search`.
+2. Add the detail panel and answer panel.
+3. Add query-path highlighting and small visual polish.

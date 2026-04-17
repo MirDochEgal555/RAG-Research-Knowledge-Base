@@ -6,14 +6,15 @@ This document describes the full end-to-end workflow in CortexRAG: what each sta
 The current pipeline is optimized for Confluence HTML space exports stored locally and answered through a local Ollama model. The primary query-time entry point is now `python -m cortex_rag ask ...`, with `scripts/ask_confluence.py` retained only as a compatibility wrapper.
 
 ## Workflow Summary
-The repository turns Confluence exports into a grounded answer in six stages:
+The repository turns Confluence exports into a grounded answer and graph-ready UI data in seven stages:
 
 1. export Confluence spaces as HTML zip archives
 2. preprocess HTML pages into Markdown files with preserved metadata
 3. chunk Markdown into retrieval-ready JSONL records
 4. generate embeddings for each chunk
 5. build a persistent vector store from those embeddings
-6. embed a user question, retrieve context, construct a prompt, and call Ollama
+6. build a persisted document/chunk graph artifact from the same embedding records
+7. embed a user question, retrieve context, construct a prompt, and call Ollama
 
 ## Inputs, Outputs, and Defaults
 Core paths and defaults live in `src/cortex_rag/config.py`.
@@ -25,6 +26,7 @@ Important defaults:
 - chunk files: `data/chunks/confluence/`
 - embedding files: `storage/embeddings/confluence/`
 - vector store: `storage/chroma/`
+- graph artifact: `storage/chroma/<collection>.graph.json`
 - default embedding model: `sentence-transformers/all-MiniLM-L6-v2`
 - default vector collection: `confluence`
 - default Ollama host: `http://127.0.0.1:11434`
@@ -254,7 +256,50 @@ This manifest is critical at query time because it tells the runtime:
 - which embedding model the index expects
 - how many dimensions the query embedding must have
 
-## Stage 6: Retrieval at Query Time
+## Stage 6: Graph Artifact Build
+Entry points:
+
+- `scripts/build_confluence_graph.py`
+- `python -m cortex_rag build-graph ...`
+
+Implementation:
+
+- `src/cortex_rag/graph/confluence_graph.py`
+
+What happens:
+
+1. the graph build reads the same embedding JSONL records used for the vector store
+2. it creates one `document` node per source page
+3. it creates one `chunk` node per chunk record
+4. it creates `belongs_to` edges from document nodes to chunk nodes
+5. it computes offline `similar_to` edges between chunk nodes from embedding cosine similarity
+6. it writes a persisted JSON artifact next to the vector store
+
+Current MVP graph rules:
+
+- node types: `document`, `chunk`
+- edge types: `belongs_to`, `similar_to`
+- document identity comes from `source_path` when available
+- chunk identity comes from `chunk_id`
+- similarity edges are limited by:
+  - `--similarity-top-k`
+  - `--similarity-threshold`
+
+Artifact example:
+
+```json
+{
+  "collection_name": "confluence",
+  "document_node_count": 12,
+  "chunk_node_count": 57,
+  "belongs_to_edge_count": 57,
+  "similar_to_edge_count": 96,
+  "similarity_top_k": 3,
+  "similarity_threshold": 0.6
+}
+```
+
+## Stage 7: Retrieval at Query Time
 Entry points:
 
 - `scripts/query_confluence_vector_store.py`
@@ -304,7 +349,7 @@ Default trimmed result count:
 - `5` for general retrieval
 - `2` for `python -m cortex_rag ask ...` before prompt construction
 
-## Stage 7: Prompt Construction
+## Stage 8: Prompt Construction
 Entry point:
 
 - called from `src/cortex_rag/generation/confluence_answering.py`
@@ -343,7 +388,7 @@ Each retrieved chunk in the prompt includes:
 - score
 - chunk text
 
-## Stage 8: Answer Generation with Ollama
+## Stage 9: Answer Generation with Ollama
 Entry point:
 
 - `python -m cortex_rag ask ...`
@@ -394,12 +439,14 @@ If a Confluence export changes, the practical rebuild path is:
 2. rerun chunking
 3. rerun embeddings
 4. rebuild the vector store
+5. rebuild the graph artifact
 
 The downstream stages depend on the upstream artifacts:
 
 - changed Markdown means chunk boundaries may change
 - changed chunks mean embeddings must be regenerated
 - changed embeddings mean the vector store must be rebuilt
+- changed embeddings also mean the graph artifact must be rebuilt
 
 ## Routine Runtime Paths
 Two common runtime modes exist in this repo:
@@ -413,6 +460,7 @@ Flow:
 2. chunk Markdown
 3. generate embeddings
 4. rebuild the vector store
+5. rebuild the graph artifact
 
 ### Query and answer mode
 Used after the vector store already exists.
@@ -430,12 +478,14 @@ Flow:
 - The in-process SentenceTransformer cache only helps long-lived Python processes, not separate one-shot script runs.
 - `answer_confluence_question(...)` does not call Ollama if retrieval returns no usable context.
 - Rebuilding the vector store replaces the existing collection for the selected name.
+- The graph artifact is not auto-rebuilt unless you explicitly run `build-graph` or `build-vector-store --with-graph`.
 
 ## Relevant Code
 - preprocessing: `src/cortex_rag/ingestion/confluence_html.py`
 - chunking: `src/cortex_rag/ingestion/confluence_chunks.py`
 - embeddings: `src/cortex_rag/retrieval/confluence_embeddings.py`
 - vector store and retrieval: `src/cortex_rag/retrieval/vector_store.py`
+- graph model and persistence: `src/cortex_rag/graph/confluence_graph.py`
 - end-to-end answer flow: `src/cortex_rag/generation/confluence_answering.py`
 - prompt building: `src/cortex_rag/generation/prompting.py`
 - Ollama client: `src/cortex_rag/generation/ollama_client.py`

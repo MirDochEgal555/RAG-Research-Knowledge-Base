@@ -17,6 +17,7 @@ from cortex_rag.api.serializers import (
     build_search_response,
 )
 from cortex_rag.generation import AnswerTimings, ConfluenceAnswerResult, GenerationResult
+from cortex_rag.graph import GraphEdge, GraphNeighborhood, GraphNode
 from cortex_rag.retrieval import SearchResult
 
 
@@ -85,30 +86,56 @@ def test_build_answer_response_serializes_structured_answer() -> None:
 def test_build_graph_neighborhood_response_creates_document_and_chunk_nodes() -> None:
     response = build_graph_neighborhood_response(
         "What changed?",
-        [
-            SearchResult(
-                chunk_id="architecture-3309569:001",
-                score=0.91,
-                text="The execution layer runs retrieval and generation steps.",
-                metadata={
-                    "page": "Architecture",
-                    "section": "Execution layer",
-                    "source_path": "ASA/architecture-3309569.md",
-                    "space_key": "ASA",
-                },
-            ),
-            SearchResult(
-                chunk_id="architecture-3309569:002",
-                score=0.87,
-                text="The orchestration layer schedules retrieval tasks.",
-                metadata={
-                    "page": "Architecture",
-                    "section": "Orchestration",
-                    "source_path": "ASA/architecture-3309569.md",
-                    "space_key": "ASA",
-                },
-            ),
-        ],
+        GraphNeighborhood(
+            seed_node_ids=["chunk::architecture-3309569:001", "chunk::architecture-3309569:002"],
+            highlighted_node_ids=["chunk::architecture-3309569:001", "document::ASA/architecture-3309569.md"],
+            nodes=[
+                GraphNode(
+                    id="document::ASA/architecture-3309569.md",
+                    type="document",
+                    label="Architecture",
+                    metadata={"page": "Architecture"},
+                ),
+                GraphNode(
+                    id="chunk::architecture-3309569:001",
+                    type="chunk",
+                    label="Execution layer",
+                    metadata={"chunk_id": "architecture-3309569:001"},
+                ),
+                GraphNode(
+                    id="chunk::architecture-3309569:002",
+                    type="chunk",
+                    label="Orchestration",
+                    metadata={"chunk_id": "architecture-3309569:002"},
+                ),
+            ],
+            edges=[
+                GraphEdge(
+                    id="document::ASA/architecture-3309569.md--chunk::architecture-3309569:001::belongs_to",
+                    source="document::ASA/architecture-3309569.md",
+                    target="chunk::architecture-3309569:001",
+                    type="belongs_to",
+                    weight=1.0,
+                    metadata={"reason": "chunk_source_membership"},
+                ),
+                GraphEdge(
+                    id="document::ASA/architecture-3309569.md--chunk::architecture-3309569:002::belongs_to",
+                    source="document::ASA/architecture-3309569.md",
+                    target="chunk::architecture-3309569:002",
+                    type="belongs_to",
+                    weight=1.0,
+                    metadata={"reason": "chunk_source_membership"},
+                ),
+                GraphEdge(
+                    id="chunk::architecture-3309569:001--chunk::architecture-3309569:002::similar_to",
+                    source="chunk::architecture-3309569:001",
+                    target="chunk::architecture-3309569:002",
+                    type="similar_to",
+                    weight=0.88,
+                    metadata={"reason": "embedding_similarity"},
+                ),
+            ],
+        ),
     )
 
     assert response.query == "What changed?"
@@ -123,4 +150,5 @@ def test_build_graph_neighborhood_response_creates_document_and_chunk_nodes() ->
         "chunk::architecture-3309569:002",
     }
     assert [edge.type for edge in response.edges] == ["belongs_to", "belongs_to", "similar_to"]
-    assert response.edges[2].metadata["reason"] == "adjacent_retrieval_rank"
+    assert response.edges[2].metadata["reason"] == "embedding_similarity"
+    assert response.nodes[0].highlighted is True

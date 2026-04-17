@@ -23,6 +23,7 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip setuptools wheel
 pip install -r requirements-dev.txt
+pip install -e .
 ```
 
 Put Confluence HTML export zip files in `data/raw/confluence/`, then run:
@@ -32,17 +33,21 @@ python scripts\preprocess_confluence_exports.py
 python scripts\chunk_confluence_exports.py
 python scripts\embed_confluence_chunks.py
 python -m cortex_rag build-vector-store
+python -m cortex_rag build-graph
 python -m cortex_rag ask "What does the architecture say about the execution layer?"
 ```
 
 The package CLI is now the primary query-time interface:
 
 ```powershell
+python -m cortex_rag build-graph --similarity-top-k 3 --similarity-threshold 0.6
 python -m cortex_rag similarity-search "How are leads qualified?"
 python -m cortex_rag ask "How are leads qualified?" --mode technical
 ```
 
 `scripts\ask_confluence.py` still exists as a compatibility wrapper, but new usage should go through `python -m cortex_rag ...`.
+
+The graph build step persists `storage/chroma/<collection>.graph.json` for the UI backend. You can also build both artifacts together with `python -m cortex_rag build-vector-store --with-graph`.
 
 ## UI Backend
 The thin UI backend now lives under `src/cortex_rag/api/` and exposes:

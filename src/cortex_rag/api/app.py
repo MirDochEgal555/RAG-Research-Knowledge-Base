@@ -19,6 +19,7 @@ from cortex_rag.api.serializers import (
     build_search_response,
 )
 from cortex_rag.generation import answer_confluence_question
+from cortex_rag.graph import build_graph_neighborhood, load_confluence_graph
 from cortex_rag.retrieval import retrieve_confluence_context
 
 
@@ -97,9 +98,17 @@ def create_app() -> Any:
                 model_name=request.model,
                 device=request.device,
             )
+            graph = load_confluence_graph(
+                persist_dir=request.persist_dir,
+                collection_name=request.collection,
+            )
+            neighborhood = build_graph_neighborhood(
+                graph,
+                seed_chunk_ids=[result.chunk_id for result in results],
+            )
         except Exception as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        return build_graph_neighborhood_response(request.query, results)
+        return build_graph_neighborhood_response(request.query, neighborhood)
 
     return app

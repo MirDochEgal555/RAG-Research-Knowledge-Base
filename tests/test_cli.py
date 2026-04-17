@@ -13,6 +13,7 @@ if str(SRC_DIR) not in sys.path:
 
 from cortex_rag import cli
 from cortex_rag.generation import AnswerTimings, ConfluenceAnswerResult, GenerationResult
+from cortex_rag.graph import GraphBuildResult
 from cortex_rag.retrieval import SearchResult
 
 
@@ -170,4 +171,81 @@ def test_ask_cli_skips_generation_output_when_no_context(
         "retrieval: 0.25s",
         "generation: 0.00s",
         "total: 1.25s",
+    ]
+
+
+def test_build_graph_cli_prints_summary(
+    monkeypatch,
+    capsys,
+) -> None:
+    def fake_build_graph(**kwargs: object) -> GraphBuildResult:
+        assert kwargs["collection_name"] == "confluence"
+        assert kwargs["similarity_top_k"] == 2
+        assert kwargs["similarity_threshold"] == 0.7
+        return GraphBuildResult(
+            collection_name="confluence",
+            persist_path=Path("storage/chroma/confluence.graph.json"),
+            document_node_count=2,
+            chunk_node_count=3,
+            belongs_to_edge_count=3,
+            similar_to_edge_count=1,
+            similarity_top_k=2,
+            similarity_threshold=0.7,
+        )
+
+    monkeypatch.setattr(cli, "build_confluence_graph", fake_build_graph)
+
+    cli.main(["build-graph", "--similarity-top-k", "2", "--similarity-threshold", "0.7"])
+
+    assert capsys.readouterr().out.splitlines() == [
+        "Built graph 'confluence' with 5 nodes and 4 edges at storage\\chroma\\confluence.graph.json.",
+    ]
+
+
+def test_build_vector_store_cli_can_also_build_graph(
+    monkeypatch,
+    capsys,
+) -> None:
+    class FakeVectorStoreBuildResult:
+        backend = "chroma"
+        collection_name = "confluence"
+        document_count = 3
+        persist_dir = Path("storage/chroma")
+
+    def fake_build_vector_store(**kwargs: object) -> FakeVectorStoreBuildResult:
+        assert kwargs["collection_name"] == "confluence"
+        return FakeVectorStoreBuildResult()
+
+    def fake_build_graph(**kwargs: object) -> GraphBuildResult:
+        assert kwargs["collection_name"] == "confluence"
+        assert kwargs["similarity_top_k"] == 4
+        assert kwargs["similarity_threshold"] == 0.8
+        return GraphBuildResult(
+            collection_name="confluence",
+            persist_path=Path("storage/chroma/confluence.graph.json"),
+            document_node_count=2,
+            chunk_node_count=3,
+            belongs_to_edge_count=3,
+            similar_to_edge_count=2,
+            similarity_top_k=4,
+            similarity_threshold=0.8,
+        )
+
+    monkeypatch.setattr(cli, "build_confluence_vector_store", fake_build_vector_store)
+    monkeypatch.setattr(cli, "build_confluence_graph", fake_build_graph)
+
+    cli.main(
+        [
+            "build-vector-store",
+            "--with-graph",
+            "--graph-similarity-top-k",
+            "4",
+            "--graph-similarity-threshold",
+            "0.8",
+        ]
+    )
+
+    assert capsys.readouterr().out.splitlines() == [
+        "Built chroma vector store 'confluence' with 3 chunks at storage\\chroma.",
+        "Built graph 'confluence' with 5 nodes and 5 edges at storage\\chroma\\confluence.graph.json.",
     ]

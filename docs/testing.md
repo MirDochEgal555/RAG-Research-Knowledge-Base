@@ -5,10 +5,12 @@ The test suite covers the current Confluence ingestion, retrieval, and generatio
 
 - `tests/test_api_serializers.py`
 - `tests/test_api_app.py`
+- `tests/test_confluence_graph.py`
 - `tests/test_generation.py`
 - `tests/test_confluence_answering.py`
 - `tests/test_cli.py`
 - `tests/test_ask_confluence.py`
+- `tests/test_build_confluence_graph.py`
 
 These tests specifically lock down:
 
@@ -21,7 +23,9 @@ These tests specifically lock down:
 - timing output when no first-token latency is available
 - API serialization for search, answer, and graph neighborhood payloads
 - FastAPI route wiring for the thin UI backend when optional HTTP dependencies are installed
+- persisted document/chunk graph generation and neighborhood extraction
 - the legacy ask script remaining a thin wrapper over the package CLI
+- the legacy graph-build script remaining a thin wrapper over the package CLI
 
 ## Run Commands
 Run the full suite from the repository root:
@@ -40,6 +44,12 @@ Run the API-focused coverage:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q tests\test_api_serializers.py tests\test_api_app.py
+```
+
+Run the graph-focused coverage:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q tests\test_confluence_graph.py tests\test_build_confluence_graph.py
 ```
 
 ## Notes
