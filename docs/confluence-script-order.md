@@ -1,24 +1,35 @@
 # Confluence Script Order
 
 ## Purpose
-This is the operator runbook for the current Confluence pipeline. It answers one question only: which script to run, in which order, and when.
 
-## Standard Order
-Run the scripts in this order from the repository root:
+This is the operator runbook for the current Confluence pipeline. It answers one question only: what should be run, in what order, for indexing, querying, and the UI.
+
+The important current distinction is:
+
+- preprocessing, chunking, and embeddings are still script-first
+- vector build, graph build, retrieval, and answer generation should prefer `python -m cortex_rag ...`
+
+## Recommended Standard Order
+
+Run the indexing flow from the repository root in this order:
 
 1. `python scripts\preprocess_confluence_exports.py`
 2. `python scripts\chunk_confluence_exports.py`
 3. `python scripts\embed_confluence_chunks.py`
-4. `python scripts\build_confluence_vector_store.py`
-5. `python scripts\build_confluence_graph.py`
-6. `python scripts\query_confluence_vector_store.py "<question>"`
-7. `python -m cortex_rag ask "<question>"`
+4. `python -m cortex_rag build-vector-store --with-graph`
 
-Only the first five steps are required to refresh the knowledge base for the graph UI. The last two are query-time commands.
+After that, use one of these runtime paths:
 
-## What Each Script Expects and Produces
+5. `python -m cortex_rag similarity-search "<question>"`
+6. `python -m cortex_rag ask "<question>"`
+7. start the API backend and frontend if you want the browser UI
+
+The first four steps refresh the knowledge base. The later steps are query-time or UI-time commands.
+
+## Indexing Commands
 
 ### 1. Preprocess raw Confluence exports
+
 Run:
 
 ```powershell
@@ -39,6 +50,7 @@ Run this when:
 - an existing export zip changed
 
 ### 2. Chunk processed Markdown
+
 Run:
 
 ```powershell
@@ -58,6 +70,7 @@ Run this after:
 - preprocessing
 
 ### 3. Generate embeddings
+
 Run:
 
 ```powershell
@@ -84,11 +97,12 @@ python scripts\embed_confluence_chunks.py --batch-size 16 --device cpu
 python scripts\embed_confluence_chunks.py --no-normalize
 ```
 
-### 4. Build the persistent vector store
-Run:
+### 4. Build the persistent vector store and graph
+
+Preferred run:
 
 ```powershell
-python scripts\build_confluence_vector_store.py
+python -m cortex_rag build-vector-store --with-graph
 ```
 
 Reads:
@@ -97,8 +111,9 @@ Reads:
 
 Writes:
 
-- `storage/chroma/confluence.manifest.json`
+- `storage/chroma/<collection>.manifest.json`
 - backend-specific vector-store files under `storage/chroma/`
+- `storage/chroma/<collection>.graph.json`
 
 Run this after:
 
@@ -107,45 +122,50 @@ Run this after:
 Useful variants:
 
 ```powershell
-python scripts\build_confluence_vector_store.py --backend chroma
-python scripts\build_confluence_vector_store.py --backend faiss
-python scripts\build_confluence_vector_store.py --collection asa-dev
-python -m cortex_rag build-vector-store --with-graph
+python -m cortex_rag build-vector-store --backend chroma
+python -m cortex_rag build-vector-store --backend faiss
+python -m cortex_rag build-vector-store --collection asa-dev
+python -m cortex_rag build-vector-store --with-graph --graph-similarity-top-k 5 --graph-similarity-threshold 0.7
 ```
 
-### 5. Build the persisted graph artifact
-Run:
+Legacy vector-build script still exists:
+
+```powershell
+python scripts\build_confluence_vector_store.py
+```
+
+If you use the legacy script, build the graph separately afterward.
+
+### 5. Build only the graph artifact
+
+Use this when the vector store already exists and you only need to rebuild graph edges or graph metadata:
+
+```powershell
+python -m cortex_rag build-graph
+```
+
+Useful variants:
+
+```powershell
+python -m cortex_rag build-graph --collection asa-dev
+python -m cortex_rag build-graph --similarity-top-k 5
+python -m cortex_rag build-graph --similarity-threshold 0.7
+```
+
+Compatibility wrapper:
 
 ```powershell
 python scripts\build_confluence_graph.py
 ```
 
-Reads:
-
-- `storage/embeddings/confluence/**/*.jsonl`
-
-Writes:
-
-- `storage/chroma/confluence.graph.json`
-
-Use this when:
-
-- you want the UI backend to serve document/chunk neighborhoods without recomputing edges on every request
-- the embeddings changed and the graph needs to stay aligned with the vector store
-
-Useful variants:
-
-```powershell
-python scripts\build_confluence_graph.py --similarity-top-k 5
-python scripts\build_confluence_graph.py --similarity-threshold 0.7
-python -m cortex_rag build-graph --collection asa-dev
-```
+## Query Commands
 
 ### 6. Inspect retrieval results
-Run:
+
+Preferred run:
 
 ```powershell
-python scripts\query_confluence_vector_store.py "What does the architecture say about the execution layer?"
+python -m cortex_rag similarity-search "What does the architecture say about the execution layer?"
 ```
 
 Reads:
@@ -159,19 +179,26 @@ Writes:
 
 Use this when:
 
-- you want to inspect raw retrieval quality before involving Ollama
+- you want to inspect retrieval quality before involving Ollama
 - you want to tune `candidate-k`, `top-k`, or `min-score`
 
 Useful variants:
 
 ```powershell
-python scripts\query_confluence_vector_store.py "How are leads qualified?" --candidate-k 10 --top-k 3
-python scripts\query_confluence_vector_store.py "How are leads qualified?" --min-score 0.7
-python scripts\query_confluence_vector_store.py "How are leads qualified?" --model C:\models\all-MiniLM-L6-v2
+python -m cortex_rag similarity-search "How are leads qualified?" --candidate-k 10 --top-k 3
+python -m cortex_rag similarity-search "How are leads qualified?" --min-score 0.7
+python -m cortex_rag similarity-search "How are leads qualified?" --model C:\models\all-MiniLM-L6-v2
+```
+
+Legacy script:
+
+```powershell
+python scripts\query_confluence_vector_store.py "How are leads qualified?"
 ```
 
 ### 7. Ask a full RAG question
-Run:
+
+Preferred run:
 
 ```powershell
 python -m cortex_rag ask "What does the architecture say about the execution layer?"
@@ -204,22 +231,72 @@ python -m cortex_rag ask "How are leads qualified?" --ollama-model mistral:lates
 
 Compatibility note:
 
-- `scripts\ask_confluence.py` still works, but it now forwards directly to `python -m cortex_rag ask ...`.
+- `scripts\ask_confluence.py` still works, but it forwards directly to `python -m cortex_rag ask ...`
+
+## UI Commands
+
+### 8. Start the API backend
+
+Run from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn --app-dir src cortex_rag.api:create_app --factory --reload
+```
+
+The backend expects:
+
+- a built vector store manifest
+- a built graph artifact
+- access to the configured embedding model
+
+Endpoints exposed:
+
+- `GET /health`
+- `POST /search`
+- `POST /answer`
+- `POST /graph/neighborhood`
+
+### 9. Start the frontend
+
+Run in a second terminal:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Default local URL:
+
+- `http://127.0.0.1:5173`
+
+The Vite dev server proxies API calls to `http://127.0.0.1:8000` by default.
+
+See [ui-usage.md](./ui-usage.md) for the operator guide to the UI itself.
 
 ## Refresh Scenarios
 
 ### New or changed Confluence export
-Run all indexing steps again:
+
+Run the full indexing flow again:
 
 ```powershell
 python scripts\preprocess_confluence_exports.py
 python scripts\chunk_confluence_exports.py
 python scripts\embed_confluence_chunks.py
-python scripts\build_confluence_vector_store.py
-python scripts\build_confluence_graph.py
+python -m cortex_rag build-vector-store --with-graph
+```
+
+### Embeddings already exist and you only need a rebuilt graph
+
+Run:
+
+```powershell
+python -m cortex_rag build-graph
 ```
 
 ### No content change, just ask a question
+
 Run only:
 
 ```powershell
@@ -227,14 +304,24 @@ python -m cortex_rag ask "<question>"
 ```
 
 ### Retrieval looks wrong and you want to debug before generation
+
 Run:
 
 ```powershell
-python scripts\query_confluence_vector_store.py "<question>"
+python -m cortex_rag similarity-search "<question>"
+```
+
+### You want the browser UI
+
+Run:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn --app-dir src cortex_rag.api:create_app --factory --reload
+cd frontend
+npm run dev
 ```
 
 ## Recommended First-Time Setup Flow
-If you are setting up the repo on a fresh machine:
 
 1. create and activate `.venv`
 2. install `requirements-dev.txt`
@@ -242,33 +329,50 @@ If you are setting up the repo on a fresh machine:
 4. run preprocess
 5. run chunking
 6. run embeddings
-7. run vector-store build
-8. run graph build
-9. run a retrieval query
-10. run `python -m cortex_rag ask ...` once Ollama is available
+7. run `python -m cortex_rag build-vector-store --with-graph`
+8. run a retrieval query
+9. run `python -m cortex_rag ask ...` once Ollama is available
+10. start the backend and frontend if you want the UI
 
 ## Common Mistakes
+
 - Running `chunk_confluence_exports.py` before preprocessing. There will be no Markdown input to chunk.
-- Running `build_confluence_vector_store.py` before embeddings exist. The build step will fail because there are no embedding records.
+- Running the vector-store build before embeddings exist. The build step will fail because there are no embedding records.
+- Using the legacy vector-store script and forgetting to build the graph artifact afterward.
 - Running the graph UI without building `confluence.graph.json`. `/graph/neighborhood` depends on the persisted graph artifact.
 - Changing the embedding model and then querying an old index without rebuilding it. Query vectors must match the manifest dimensions and model assumptions.
 - Changing embeddings or chunk boundaries and forgetting to rebuild the graph artifact. The graph should track the same chunk corpus as the vector store.
 - Expecting `python -m cortex_rag ask ...` to work before the vector store exists.
 - Expecting `python -m cortex_rag ask ...` to work if Ollama is not running or the configured model is missing.
+- Starting the frontend without the backend. The page will load, but API-backed actions will fail.
 
 ## Minimal Daily Commands
+
 To refresh the corpus:
 
 ```powershell
 python scripts\preprocess_confluence_exports.py
 python scripts\chunk_confluence_exports.py
 python scripts\embed_confluence_chunks.py
-python scripts\build_confluence_vector_store.py
-python scripts\build_confluence_graph.py
+python -m cortex_rag build-vector-store --with-graph
 ```
 
-To ask a question afterward:
+To inspect retrieval:
+
+```powershell
+python -m cortex_rag similarity-search "<question>"
+```
+
+To ask a question:
 
 ```powershell
 python -m cortex_rag ask "<question>"
+```
+
+To run the UI:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn --app-dir src cortex_rag.api:create_app --factory --reload
+cd frontend
+npm run dev
 ```

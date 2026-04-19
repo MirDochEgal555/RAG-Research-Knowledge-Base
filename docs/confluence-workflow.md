@@ -1,23 +1,68 @@
 # Confluence RAG Workflow
 
 ## Purpose
-This document describes the full end-to-end workflow in CortexRAG: what each stage reads, what it writes, how the data shape changes, and what happens when a user asks a question.
 
-The current pipeline is optimized for Confluence HTML space exports stored locally and answered through a local Ollama model. The primary query-time entry point is now `python -m cortex_rag ask ...`, with `scripts/ask_confluence.py` retained only as a compatibility wrapper.
+This document describes the current end-to-end Confluence pipeline in CortexRAG: what each stage reads, what it writes, and which entry points are now considered primary.
+
+The pipeline has two distinct modes:
+
+- indexing mode: turn Confluence exports into persistent retrieval and graph artifacts
+- runtime mode: answer questions and drive the UI from those persisted artifacts
+
+## Current Entry Points
+
+The repo now uses a mixed model:
+
+- preprocessing, chunking, and embedding generation are still script-first
+- vector-store build, graph build, retrieval, and answering have package CLI entry points
+- `scripts/ask_confluence.py` and `scripts/build_confluence_graph.py` are compatibility wrappers, not the preferred interface
+
+Primary commands today:
+
+```powershell
+python scripts\preprocess_confluence_exports.py
+python scripts\chunk_confluence_exports.py
+python scripts\embed_confluence_chunks.py
+python -m cortex_rag build-vector-store --with-graph
+python -m cortex_rag similarity-search "your question"
+python -m cortex_rag ask "your question"
+```
+
+For the UI stack after indexing:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn --app-dir src cortex_rag.api:create_app --factory --reload
+cd frontend
+npm run dev
+```
 
 ## Workflow Summary
-The repository turns Confluence exports into a grounded answer and graph-ready UI data in seven stages:
+
+The repository turns Confluence HTML exports into three runtime products:
+
+- a persistent vector store
+- a persisted document/chunk graph artifact
+- grounded answers and graph neighborhoods at query time
+
+The full indexing path is:
 
 1. export Confluence spaces as HTML zip archives
-2. preprocess HTML pages into Markdown files with preserved metadata
-3. chunk Markdown into retrieval-ready JSONL records
-4. generate embeddings for each chunk
-5. build a persistent vector store from those embeddings
-6. build a persisted document/chunk graph artifact from the same embedding records
-7. embed a user question, retrieve context, construct a prompt, and call Ollama
+2. preprocess HTML pages into Markdown
+3. chunk Markdown into retrieval-ready JSONL
+4. generate embeddings
+5. build a persistent vector store
+6. build a persisted document/chunk graph artifact
+
+The query-time path is:
+
+1. embed the user question
+2. retrieve and rerank matching chunks
+3. optionally build a grounded answer with Ollama
+4. optionally build a graph neighborhood for the UI
 
 ## Inputs, Outputs, and Defaults
-Core paths and defaults live in `src/cortex_rag/config.py`.
+
+Core defaults live in [src/cortex_rag/config.py](/c:/Users/robin.keim/Documents/CortexRAG/src/cortex_rag/config.py).
 
 Important defaults:
 
@@ -25,15 +70,16 @@ Important defaults:
 - processed Markdown: `data/processed/confluence/`
 - chunk files: `data/chunks/confluence/`
 - embedding files: `storage/embeddings/confluence/`
-- vector store: `storage/chroma/`
+- vector store directory: `storage/chroma/`
 - graph artifact: `storage/chroma/<collection>.graph.json`
-- default embedding model: `sentence-transformers/all-MiniLM-L6-v2`
 - default vector collection: `confluence`
+- default embedding model: `sentence-transformers/all-MiniLM-L6-v2`
 - default Ollama host: `http://127.0.0.1:11434`
 - default Ollama model: `llama3.2:3b`
 - default prompt template: `prompts/confluence_rag.md`
 
 ## Stage 1: Raw Confluence Exports
+
 Expected input:
 
 - one `.zip` file per Confluence space
@@ -46,9 +92,10 @@ Example:
 The preprocessing step infers the space key from the zip filename stem before the first underscore. For `ASA_2026-04-16.zip`, the space key is `ASA`.
 
 ## Stage 2: HTML Preprocessing to Markdown
-Entry point:
 
-- `scripts/preprocess_confluence_exports.py`
+Primary entry point:
+
+- `python scripts\preprocess_confluence_exports.py`
 
 Implementation:
 
@@ -56,16 +103,13 @@ Implementation:
 
 What happens:
 
-1. the script scans `data/raw/confluence/` for zip archives
-2. each zip is opened and HTML pages are collected
-3. each HTML page is parsed with a standard-library HTML parser into a lightweight tree
-4. the converter identifies the page body from Confluence-specific container nodes
-5. Confluence presentation chrome is dropped
-6. page content is rendered into Markdown
-7. internal Confluence links are rewritten to local Markdown targets when possible
-8. each page is written under `data/processed/confluence/<SPACE_KEY>/`
+1. scan `data/raw/confluence/` for zip archives
+2. parse exported HTML pages
+3. strip Confluence chrome and preserve page content
+4. convert page bodies to Markdown
+5. write Markdown under `data/processed/confluence/<SPACE_KEY>/`
 
-The converter preserves useful metadata in YAML front matter:
+Preserved metadata in front matter includes:
 
 - `space_key`
 - `space_name`
@@ -77,29 +121,16 @@ The converter preserves useful metadata in YAML front matter:
 - `created_by`
 - `created_on`
 
-It also normalizes page naming:
-
-- space landing pages become `space-index.md`
-- regular pages become slug-plus-page-id names such as `architecture-3309569.md`
-- duplicate slug collisions get numeric suffixes
-
-Markdown rendering behavior:
-
-- headings are preserved as Markdown headings
-- paragraphs, links, lists, blockquotes, code blocks, and tables are converted
-- decorative images are dropped
-- external links stay external
-- relative Confluence links are resolved against the export and mapped to generated Markdown files when possible
-
-Output example:
+Output examples:
 
 - `data/processed/confluence/ASA/space-index.md`
 - `data/processed/confluence/ASA/architecture-3309569.md`
 
 ## Stage 3: Chunking Markdown into Retrieval Records
-Entry point:
 
-- `scripts/chunk_confluence_exports.py`
+Primary entry point:
+
+- `python scripts\chunk_confluence_exports.py`
 
 Implementation:
 
@@ -107,29 +138,21 @@ Implementation:
 
 What happens:
 
-1. the script scans `data/processed/confluence/`
-2. each Markdown file is split into front matter and body
-3. the Markdown body is parsed into a heading tree
-4. the chunker walks that tree and builds heading-aware sections
-5. large sections are split and very small adjacent sections are merged
-6. link references inside the text are extracted and resolved to target pages where possible
-7. chunk records are written as JSONL under `data/chunks/confluence/<SPACE_KEY>/`
+1. scan `data/processed/confluence/`
+2. split front matter and Markdown body
+3. parse the heading structure
+4. create heading-aware chunks
+5. merge or split sections to keep chunk sizes usable
+6. extract link references where possible
+7. write chunk JSONL under `data/chunks/confluence/<SPACE_KEY>/`
 
-Chunk sizing rules:
-
-- target minimum: `200` words
-- target maximum: `500` words
-- small neighboring pieces may be merged if the merged chunk stays within the max
-- oversized leaf sections are split by paragraph, then by plain-text word windows if needed
-
-Each chunk record includes:
+Each chunk record includes fields such as:
 
 - `chunk_id`
 - `page`
 - `section`
 - `headings`
 - `text`
-- `source`
 - `space_key`
 - `space_name`
 - `page_type`
@@ -141,32 +164,11 @@ Each chunk record includes:
 - `word_count`
 - `links`
 
-Example record:
-
-```json
-{
-  "chunk_id": "architecture-3309569:001",
-  "page": "RAG Architecture",
-  "section": "Embeddings",
-  "headings": ["RAG Architecture", "Embeddings"],
-  "text": "Embeddings convert text into vectors...",
-  "source": "confluence",
-  "space_key": "ASA",
-  "word_count": 241,
-  "links": [
-    {
-      "text": "Retrieval",
-      "target_path": "retrieval-222.md",
-      "target_page": "Retrieval"
-    }
-  ]
-}
-```
-
 ## Stage 4: Embedding Generation
-Entry point:
 
-- `scripts/embed_confluence_chunks.py`
+Primary entry point:
+
+- `python scripts\embed_confluence_chunks.py`
 
 Implementation:
 
@@ -175,19 +177,11 @@ Implementation:
 
 What happens:
 
-1. the script scans `data/chunks/confluence/`
-2. it loads each chunk JSONL file
-3. it extracts the chunk text fields
-4. it loads a SentenceTransformer model
-5. it encodes chunk text in batches
-6. vectors are L2-normalized by default
-7. the original chunk payload is written back out with embedding metadata and vector values
-8. outputs are written to `storage/embeddings/confluence/<SPACE_KEY>/`
-
-Important operational detail:
-
-- the first run may download the embedding model unless it is already cached locally
-- if the machine is offline, use a local model path with `--model`
+1. scan `data/chunks/confluence/`
+2. load chunk JSONL records
+3. encode chunk text with SentenceTransformers
+4. normalize vectors by default
+5. write embedding-enriched JSONL to `storage/embeddings/confluence/`
 
 Default behavior:
 
@@ -195,28 +189,37 @@ Default behavior:
 - batch size: `32`
 - normalization: enabled
 
-Output fields added per record:
+Additional output fields include:
 
 - `embedding_model`
 - `embedding_dimensions`
 - `embedding`
 
-## Stage 5: Vector Store Build
-Entry point:
+Operational note:
 
-- `scripts/build_confluence_vector_store.py`
+- the first run may download the embedding model if it is not already cached locally
+
+## Stage 5: Vector Store Build
+
+Preferred entry point:
+
+- `python -m cortex_rag build-vector-store`
+
+Legacy script entry point:
+
+- `python scripts\build_confluence_vector_store.py`
 
 Implementation:
 
 - `src/cortex_rag/retrieval/vector_store.py`
+- `src/cortex_rag/cli.py`
 
 What happens:
 
-1. the script reads all embedding JSONL records from `storage/embeddings/confluence/`
-2. it validates that all records use the same embedding model and vector size
-3. it resolves the backend
-4. it writes a persistent index
-5. it writes a manifest file describing the built store
+1. read all embedding JSONL records from `storage/embeddings/confluence/`
+2. validate a single embedding model and vector size across the corpus
+3. build a persistent Chroma or FAISS-backed store
+4. write a manifest describing the built store
 
 Backend selection:
 
@@ -224,135 +227,95 @@ Backend selection:
 - `--backend faiss` forces FAISS
 - `--backend auto` tries Chroma first, then FAISS
 
-Chroma build path:
+Primary outputs:
 
-- creates a persistent client rooted at `storage/chroma/`
-- deletes any existing collection of the same name
-- recreates and upserts records in batches
-- stores metadata payload JSON alongside document text
+- `storage/chroma/<collection>.manifest.json`
+- backend-specific vector-store files under `storage/chroma/`
 
-FAISS build path:
+Preferred combined build:
 
-- normalizes embeddings
-- writes a flat inner-product FAISS index
-- writes a parallel JSONL file of non-embedding record payloads
-
-Manifest example:
-
-```json
-{
-  "backend": "chroma",
-  "collection_name": "confluence",
-  "document_count": 57,
-  "embedding_dimensions": 384,
-  "embedding_model": "sentence-transformers/all-MiniLM-L6-v2",
-  "distance_metric": "cosine"
-}
+```powershell
+python -m cortex_rag build-vector-store --with-graph
 ```
 
-This manifest is critical at query time because it tells the runtime:
-
-- which backend to use
-- which embedding model the index expects
-- how many dimensions the query embedding must have
+That command builds the vector store and immediately writes the graph artifact as well.
 
 ## Stage 6: Graph Artifact Build
-Entry points:
 
-- `scripts/build_confluence_graph.py`
-- `python -m cortex_rag build-graph ...`
+Preferred entry point:
+
+- `python -m cortex_rag build-graph`
+
+Compatibility wrapper:
+
+- `python scripts\build_confluence_graph.py`
 
 Implementation:
 
 - `src/cortex_rag/graph/confluence_graph.py`
+- `src/cortex_rag/cli.py`
 
 What happens:
 
-1. the graph build reads the same embedding JSONL records used for the vector store
-2. it creates one `document` node per source page
-3. it creates one `chunk` node per chunk record
-4. it creates `belongs_to` edges from document nodes to chunk nodes
-5. it computes offline `similar_to` edges between chunk nodes from embedding cosine similarity
-6. it writes a persisted JSON artifact next to the vector store
+1. read the embedding JSONL records
+2. create one `document` node per source page
+3. create one `chunk` node per chunk record
+4. create `belongs_to` edges from document to chunk
+5. compute offline `similar_to` edges between chunks from cosine similarity
+6. write `storage/chroma/<collection>.graph.json`
 
-Current MVP graph rules:
+Current graph rules:
 
 - node types: `document`, `chunk`
 - edge types: `belongs_to`, `similar_to`
-- document identity comes from `source_path` when available
+- document identity prefers `source_path`
 - chunk identity comes from `chunk_id`
-- similarity edges are limited by:
-  - `--similarity-top-k`
-  - `--similarity-threshold`
+- similarity edges are limited by `--similarity-top-k` and `--similarity-threshold`
 
-Artifact example:
-
-```json
-{
-  "collection_name": "confluence",
-  "document_node_count": 12,
-  "chunk_node_count": 57,
-  "belongs_to_edge_count": 57,
-  "similar_to_edge_count": 96,
-  "similarity_top_k": 3,
-  "similarity_threshold": 0.6
-}
-```
+This graph artifact is required by the UI backend for `/graph/neighborhood`.
 
 ## Stage 7: Retrieval at Query Time
-Entry points:
 
-- `scripts/query_confluence_vector_store.py`
-- `python -m cortex_rag similarity-search ...`
+Preferred entry point:
+
+- `python -m cortex_rag similarity-search "question"`
+
+Legacy script entry point:
+
+- `python scripts\query_confluence_vector_store.py "question"`
 
 Implementation:
 
 - `src/cortex_rag/retrieval/vector_store.py`
+- `src/cortex_rag/cli.py`
 
-What happens when a query arrives:
+What happens:
 
-1. the manifest is loaded from `storage/chroma/<collection>.manifest.json`
-2. the question is embedded with the manifest embedding model unless explicitly overridden
-3. raw nearest-neighbor search runs against Chroma or FAISS
-4. the top candidate pool is reranked
-5. near-duplicate chunks are removed
-6. the final trimmed results are returned
+1. load the vector-store manifest
+2. embed the question with the recorded embedding model unless overridden
+3. run nearest-neighbor retrieval against Chroma or FAISS
+4. rerank the candidate set
+5. remove near-duplicate chunks
+6. return the final trimmed results
 
-The retrieval flow in this repo is not a plain nearest-neighbor return. It does three extra things:
+Default retrieval shaping:
 
-### 1. Candidate expansion
-It retrieves a broader candidate pool first:
+- candidate pool: `10`
+- final results for search: `5`
+- final results for answer generation: `2`
 
-- default raw candidate pool: `10`
-
-### 2. Heuristic reranking
-Results are boosted when:
-
-- multiple hits agree on the same page
-- section titles overlap with meaningful query keywords
-
-The reranker stores debug-style metadata alongside results, including:
+The retriever adds debug-style metadata such as:
 
 - `retrieval_similarity_score`
 - `retrieval_rerank_score`
 - `retrieval_page_hit_count`
 - `retrieval_section_keyword_overlap`
 
-### 3. Deduplication
-Results are filtered for near duplicates by:
-
-- normalized exact-text match
-- heavy token overlap across chunks
-
-Default trimmed result count:
-
-- `5` for general retrieval
-- `2` for `python -m cortex_rag ask ...` before prompt construction
-
 ## Stage 8: Prompt Construction
+
 Entry point:
 
-- called from `src/cortex_rag/generation/confluence_answering.py`
+- called internally from `src/cortex_rag/generation/confluence_answering.py`
 
 Implementation:
 
@@ -361,15 +324,10 @@ Implementation:
 
 What happens:
 
-1. the prompt template is loaded from `prompts/confluence_rag.md`
-2. retrieved chunks are formatted into a plain-text context block
-3. the user question is combined with:
-   - the answer mode
-   - answer-style instructions
-   - the retrieved source chunks
-4. a two-message chat payload is built:
-   - one `system` message from the prompt template
-   - one `user` message containing question and retrieval context
+1. load `prompts/confluence_rag.md`
+2. format retrieved chunks into a grounded context block
+3. combine question, answer mode, and source chunks
+4. build a two-message chat payload for Ollama
 
 Supported answer modes:
 
@@ -379,20 +337,15 @@ Supported answer modes:
 - `bullet_summary`
 - `technical`
 
-Each retrieved chunk in the prompt includes:
-
-- source number
-- chunk ID
-- page
-- section
-- score
-- chunk text
-
 ## Stage 9: Answer Generation with Ollama
-Entry point:
 
-- `python -m cortex_rag ask ...`
-- `scripts/ask_confluence.py` as a thin wrapper over the package CLI
+Preferred entry point:
+
+- `python -m cortex_rag ask "question"`
+
+Compatibility wrapper:
+
+- `python scripts\ask_confluence.py "question"`
 
 Implementation:
 
@@ -402,29 +355,20 @@ Implementation:
 
 What happens:
 
-1. the CLI calls `answer_confluence_question(...)`
-2. the package embeds the query
-3. it retrieves and reranks context chunks
-4. it stops early if no relevant chunks survive retrieval
-5. it builds the final RAG chat messages
-6. it calls Ollama through the Python client
-7. the CLI prints the answer, sources, and timing breakdown
+1. embed the query
+2. retrieve and rerank context
+3. stop early if no usable context survives retrieval
+4. build grounded prompt messages
+5. call Ollama
+6. print the answer, sources, and timing breakdown
 
-Default generation settings come from `src/cortex_rag/config.py` and environment variables:
+Important behavior:
 
-- `OLLAMA_HOST`
-- `OLLAMA_MODEL`
-- `OLLAMA_NUM_CTX`
-- `OLLAMA_TEMPERATURE`
-- `OLLAMA_NUM_PREDICT`
-- `RAG_ANSWER_MODE`
-
-Streaming behavior:
-
+- if retrieval returns no usable context, Ollama is not called
 - `--stream` prints tokens as they arrive
-- time to first token is measured separately from total generation time
+- streaming records time to first token separately
 
-Timing breakdown reported by the CLI:
+Timing breakdown:
 
 - embedding
 - retrieval
@@ -432,7 +376,39 @@ Timing breakdown reported by the CLI:
 - generation
 - total
 
+## Stage 10: UI Backend and Frontend Runtime
+
+Backend entry point:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn --app-dir src cortex_rag.api:create_app --factory --reload
+```
+
+Frontend entry point:
+
+```powershell
+cd frontend
+npm run dev
+```
+
+Backend endpoints:
+
+- `GET /health`
+- `POST /search`
+- `POST /answer`
+- `POST /graph/neighborhood`
+
+Runtime behavior:
+
+- `/health` warms the graph artifact and embedding model
+- `/search` wraps retrieval only
+- `/answer` wraps the grounded answer flow
+- `/graph/neighborhood` retrieves seed chunks, loads the persisted graph, and returns a focused neighborhood for the UI
+
+See [ui-usage.md](./ui-usage.md) for the operator guide to the current interface.
+
 ## What Gets Rebuilt When Data Changes
+
 If a Confluence export changes, the practical rebuild path is:
 
 1. rerun preprocessing
@@ -441,53 +417,68 @@ If a Confluence export changes, the practical rebuild path is:
 4. rebuild the vector store
 5. rebuild the graph artifact
 
-The downstream stages depend on the upstream artifacts:
+Short version:
 
-- changed Markdown means chunk boundaries may change
-- changed chunks mean embeddings must be regenerated
-- changed embeddings mean the vector store must be rebuilt
-- changed embeddings also mean the graph artifact must be rebuilt
+```powershell
+python scripts\preprocess_confluence_exports.py
+python scripts\chunk_confluence_exports.py
+python scripts\embed_confluence_chunks.py
+python -m cortex_rag build-vector-store --with-graph
+```
+
+The downstream dependencies are strict:
+
+- changed Markdown can change chunk boundaries
+- changed chunks require new embeddings
+- changed embeddings require a new vector store
+- changed embeddings also require a new graph artifact
 
 ## Routine Runtime Paths
-Two common runtime modes exist in this repo:
 
-### Ingestion and indexing mode
-Used when refreshing the knowledge base.
+### Indexing mode
 
-Flow:
+Used when refreshing the knowledge base:
 
-1. process zip exports
+1. preprocess exports
 2. chunk Markdown
 3. generate embeddings
-4. rebuild the vector store
-5. rebuild the graph artifact
+4. build vector store
+5. build graph artifact
 
-### Query and answer mode
-Used after the vector store already exists.
+### CLI query mode
 
-Flow:
+Used after indexing is complete:
 
-1. embed the user question
+1. embed user question
 2. retrieve reranked chunks
-3. build a grounded prompt
-4. generate an answer with Ollama
+3. optionally generate grounded answer with Ollama
+
+### UI mode
+
+Used after indexing is complete:
+
+1. start the FastAPI backend
+2. start the frontend
+3. load the graph neighborhood, answer, and search endpoints from the browser
 
 ## Practical Constraints
-- Embedding-model downloads may require network access on the first run.
-- Query embeddings must match the dimensions recorded in the vector-store manifest.
-- The in-process SentenceTransformer cache only helps long-lived Python processes, not separate one-shot script runs.
-- `answer_confluence_question(...)` does not call Ollama if retrieval returns no usable context.
-- Rebuilding the vector store replaces the existing collection for the selected name.
-- The graph artifact is not auto-rebuilt unless you explicitly run `build-graph` or `build-vector-store --with-graph`.
+
+- embedding-model downloads may require network access on the first run
+- query embeddings must match the dimensions recorded in the manifest
+- rebuilding the vector store replaces the existing collection for the selected name
+- the graph artifact is not auto-rebuilt unless you run `build-graph` or `build-vector-store --with-graph`
+- `python -m cortex_rag ask ...` depends on a working Ollama runtime and configured model
+- the UI backend depends on both the vector-store manifest and the graph artifact
 
 ## Relevant Code
+
 - preprocessing: `src/cortex_rag/ingestion/confluence_html.py`
 - chunking: `src/cortex_rag/ingestion/confluence_chunks.py`
 - embeddings: `src/cortex_rag/retrieval/confluence_embeddings.py`
 - vector store and retrieval: `src/cortex_rag/retrieval/vector_store.py`
 - graph model and persistence: `src/cortex_rag/graph/confluence_graph.py`
-- end-to-end answer flow: `src/cortex_rag/generation/confluence_answering.py`
+- answer flow: `src/cortex_rag/generation/confluence_answering.py`
 - prompt building: `src/cortex_rag/generation/prompting.py`
 - Ollama client: `src/cortex_rag/generation/ollama_client.py`
+- API backend: `src/cortex_rag/api/app.py`
 - CLI entry points: `src/cortex_rag/cli.py`
-- compatibility wrapper: `scripts/ask_confluence.py`

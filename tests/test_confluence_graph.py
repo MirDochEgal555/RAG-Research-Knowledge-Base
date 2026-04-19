@@ -97,6 +97,19 @@ def test_build_confluence_graph_persists_document_chunk_and_similarity_edges(tmp
     }
     assert {edge.type for edge in graph.edges} == {"belongs_to", "similar_to"}
     assert any(edge.id == "chunk::architecture-3309569:001--chunk::architecture-3309569:002::similar_to" for edge in graph.edges)
+    document_node = next(node for node in graph.nodes if node.id == "document::ASA/architecture-3309569.md")
+    chunk_node = next(node for node in graph.nodes if node.id == "chunk::architecture-3309569:001")
+    belongs_to_edge = next(
+        edge for edge in graph.edges if edge.id == "document::ASA/architecture-3309569.md--chunk::architecture-3309569:001::belongs_to"
+    )
+    similarity_edge = next(
+        edge for edge in graph.edges if edge.id == "chunk::architecture-3309569:001--chunk::architecture-3309569:002::similar_to"
+    )
+    assert document_node.metadata["summary"] == "Embeddings convert text into vectors."
+    assert chunk_node.metadata["summary"] == "Embeddings convert text into vectors."
+    assert belongs_to_edge.metadata["reason"] == "same_document"
+    assert similarity_edge.metadata["reason"] == "nearest_neighbor_similarity"
+    assert similarity_edge.metadata["shared_metadata"] == ["same source (confluence)", "same space (ASA)"]
 
 
 def test_build_graph_neighborhood_expands_seed_chunks_to_documents_and_similar_neighbors(tmp_path: Path) -> None:
@@ -171,12 +184,22 @@ def test_build_graph_neighborhood_expands_seed_chunks_to_documents_and_similar_n
         "chunk::architecture-3309569:001",
         "document::ASA/architecture-3309569.md",
     }
+    assert set(neighborhood.query_path_node_ids) == {
+        "document::ASA/architecture-3309569.md",
+        "chunk::architecture-3309569:001",
+        "chunk::architecture-3309569:002",
+    }
     assert {node.id for node in neighborhood.nodes} == {
         "document::ASA/architecture-3309569.md",
         "chunk::architecture-3309569:001",
         "chunk::architecture-3309569:002",
     }
     assert {edge.id for edge in neighborhood.edges} == {
+        "document::ASA/architecture-3309569.md--chunk::architecture-3309569:001::belongs_to",
+        "document::ASA/architecture-3309569.md--chunk::architecture-3309569:002::belongs_to",
+        "chunk::architecture-3309569:001--chunk::architecture-3309569:002::similar_to",
+    }
+    assert set(neighborhood.query_path_edge_ids) == {
         "document::ASA/architecture-3309569.md--chunk::architecture-3309569:001::belongs_to",
         "document::ASA/architecture-3309569.md--chunk::architecture-3309569:002::belongs_to",
         "chunk::architecture-3309569:001--chunk::architecture-3309569:002::similar_to",

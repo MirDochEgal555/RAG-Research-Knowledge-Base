@@ -89,18 +89,27 @@ def test_build_graph_neighborhood_response_creates_document_and_chunk_nodes() ->
         GraphNeighborhood(
             seed_node_ids=["chunk::architecture-3309569:001", "chunk::architecture-3309569:002"],
             highlighted_node_ids=["chunk::architecture-3309569:001", "document::ASA/architecture-3309569.md"],
+            query_path_node_ids=[
+                "chunk::architecture-3309569:001",
+                "chunk::architecture-3309569:002",
+                "document::ASA/architecture-3309569.md",
+            ],
+            query_path_edge_ids=[
+                "document::ASA/architecture-3309569.md--chunk::architecture-3309569:001::belongs_to",
+                "chunk::architecture-3309569:001--chunk::architecture-3309569:002::similar_to",
+            ],
             nodes=[
                 GraphNode(
                     id="document::ASA/architecture-3309569.md",
                     type="document",
                     label="Architecture",
-                    metadata={"page": "Architecture"},
+                    metadata={"page": "Architecture", "summary": "Architecture overview."},
                 ),
                 GraphNode(
                     id="chunk::architecture-3309569:001",
                     type="chunk",
                     label="Execution layer",
-                    metadata={"chunk_id": "architecture-3309569:001"},
+                    metadata={"chunk_id": "architecture-3309569:001", "summary": "Execution layer details."},
                 ),
                 GraphNode(
                     id="chunk::architecture-3309569:002",
@@ -116,7 +125,7 @@ def test_build_graph_neighborhood_response_creates_document_and_chunk_nodes() ->
                     target="chunk::architecture-3309569:001",
                     type="belongs_to",
                     weight=1.0,
-                    metadata={"reason": "chunk_source_membership"},
+                    metadata={"reason": "same_document"},
                 ),
                 GraphEdge(
                     id="document::ASA/architecture-3309569.md--chunk::architecture-3309569:002::belongs_to",
@@ -124,7 +133,7 @@ def test_build_graph_neighborhood_response_creates_document_and_chunk_nodes() ->
                     target="chunk::architecture-3309569:002",
                     type="belongs_to",
                     weight=1.0,
-                    metadata={"reason": "chunk_source_membership"},
+                    metadata={"reason": "same_document"},
                 ),
                 GraphEdge(
                     id="chunk::architecture-3309569:001--chunk::architecture-3309569:002::similar_to",
@@ -132,7 +141,7 @@ def test_build_graph_neighborhood_response_creates_document_and_chunk_nodes() ->
                     target="chunk::architecture-3309569:002",
                     type="similar_to",
                     weight=0.88,
-                    metadata={"reason": "embedding_similarity"},
+                    metadata={"reason": "nearest_neighbor_similarity"},
                 ),
             ],
         ),
@@ -150,5 +159,9 @@ def test_build_graph_neighborhood_response_creates_document_and_chunk_nodes() ->
         "chunk::architecture-3309569:002",
     }
     assert [edge.type for edge in response.edges] == ["belongs_to", "belongs_to", "similar_to"]
-    assert response.edges[2].metadata["reason"] == "embedding_similarity"
+    assert response.edges[2].metadata["reason"] == "nearest_neighbor_similarity"
     assert response.nodes[0].highlighted is True
+    assert response.nodes[0].in_query_path is True
+    assert response.edges[0].in_query_path is True
+    assert response.edges[1].in_query_path is False
+    assert response.nodes[0].metadata["summary"] == "Architecture overview."

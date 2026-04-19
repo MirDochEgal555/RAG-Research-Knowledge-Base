@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from threading import Lock
 from typing import Any
 
+from cortex_rag.config import DEFAULT_VECTOR_COLLECTION, VECTOR_DB_DIR
 from cortex_rag.api.schemas import (
     AnswerRequest,
     AnswerResponse,
@@ -20,7 +22,43 @@ from cortex_rag.api.serializers import (
 )
 from cortex_rag.generation import answer_confluence_question
 from cortex_rag.graph import build_graph_neighborhood, load_confluence_graph
-from cortex_rag.retrieval import retrieve_confluence_context
+from cortex_rag.retrieval import (
+    load_vector_store_manifest,
+    preload_sentence_transformer,
+    retrieve_confluence_context,
+)
+
+
+_UI_RUNTIME_WARMUP_LOCK = Lock()
+_WARMED_UI_RUNTIME_KEYS: set[tuple[str, str]] = set()
+
+
+def warm_ui_runtime_assets(
+    *,
+    persist_dir=VECTOR_DB_DIR,
+    collection_name: str = DEFAULT_VECTOR_COLLECTION,
+) -> None:
+    """Preload the graph artifact and embedding model once per process."""
+    cache_key = (str(persist_dir), collection_name)
+    if cache_key in _WARMED_UI_RUNTIME_KEYS:
+        return
+
+    with _UI_RUNTIME_WARMUP_LOCK:
+        if cache_key in _WARMED_UI_RUNTIME_KEYS:
+            return
+        manifest = load_vector_store_manifest(
+            persist_dir=persist_dir,
+            collection_name=collection_name,
+        )
+        load_confluence_graph(
+            persist_dir=persist_dir,
+            collection_name=collection_name,
+        )
+        preload_sentence_transformer(
+            model_name=manifest.embedding_model,
+            device=None,
+        )
+        _WARMED_UI_RUNTIME_KEYS.add(cache_key)
 
 
 def create_app() -> Any:
@@ -37,11 +75,19 @@ def create_app() -> Any:
 
     @app.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
+        try:
+            warm_ui_runtime_assets()
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         return HealthResponse()
 
     @app.post("/search", response_model=SearchResponse)
     def search(request: SearchRequest) -> SearchResponse:
         try:
+            warm_ui_runtime_assets(
+                persist_dir=request.persist_dir,
+                collection_name=request.collection,
+            )
             results = retrieve_confluence_context(
                 request.query,
                 candidate_k=request.candidate_k,
@@ -61,6 +107,10 @@ def create_app() -> Any:
     @app.post("/answer", response_model=AnswerResponse)
     def answer(request: AnswerRequest) -> AnswerResponse:
         try:
+            warm_ui_runtime_assets(
+                persist_dir=request.persist_dir,
+                collection_name=request.collection,
+            )
             result = answer_confluence_question(
                 request.query,
                 candidate_k=request.candidate_k,
@@ -87,6 +137,10 @@ def create_app() -> Any:
     @app.post("/graph/neighborhood", response_model=GraphNeighborhoodResponse)
     def graph_neighborhood(request: GraphNeighborhoodRequest) -> GraphNeighborhoodResponse:
         try:
+            warm_ui_runtime_assets(
+                persist_dir=request.persist_dir,
+                collection_name=request.collection,
+            )
             results = retrieve_confluence_context(
                 request.query,
                 candidate_k=request.candidate_k,

@@ -43,6 +43,13 @@ build/
 dist/
 *.egg-info/
 
+# Frontend build artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
+
 # Local/generated corpus data and vector-store artifacts
 data/tmp*/
 data/raw/*

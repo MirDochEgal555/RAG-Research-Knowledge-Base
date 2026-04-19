@@ -108,6 +108,7 @@ class GraphNodePayload(APIModel):
     type: GraphNodeType
     label: str
     highlighted: bool = False
+    in_query_path: bool = False
     metadata: dict[str, Any]
 
 
@@ -117,6 +118,7 @@ class GraphEdgePayload(APIModel):
     target: str
     type: GraphEdgeType
     weight: float | None = None
+    in_query_path: bool = False
     metadata: dict[str, Any]
 
 

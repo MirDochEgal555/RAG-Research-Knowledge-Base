@@ -14,6 +14,7 @@ from cortex_rag.config import DEFAULT_VECTOR_COLLECTION, EMBEDDINGS_DIR, VECTOR_
 GraphNodeType = Literal["document", "chunk"]
 GraphEdgeType = Literal["belongs_to", "similar_to"]
 CONFLUENCE_EMBEDDINGS_DIR = EMBEDDINGS_DIR / "confluence"
+SUMMARY_MAX_CHARS = 320
 
 
 @dataclass(frozen=True)
@@ -89,6 +90,8 @@ class GraphNeighborhood:
 
     seed_node_ids: list[str]
     highlighted_node_ids: list[str]
+    query_path_node_ids: list[str]
+    query_path_edge_ids: list[str]
     nodes: list[GraphNode]
     edges: list[GraphEdge]
 
@@ -219,13 +222,17 @@ def build_graph_neighborhood(
     seed_node_ids = [f"chunk::{chunk_id}" for chunk_id in seed_chunk_ids if f"chunk::{chunk_id}" in nodes_by_id]
     included_nodes: set[str] = set(seed_node_ids)
     highlighted_nodes: set[str] = set(seed_node_ids)
+    query_path_nodes: set[str] = set(seed_node_ids)
+    query_path_edges: set[str] = set()
     included_edges: dict[str, GraphEdge] = {}
 
     for seed_node_id in seed_node_ids:
         for edge in edges_by_node.get(seed_node_id, []):
             included_edges[edge.id] = edge
+            query_path_edges.add(edge.id)
             other_node_id = edge.target if edge.source == seed_node_id else edge.source
             included_nodes.add(other_node_id)
+            query_path_nodes.add(other_node_id)
             if edge.type == "belongs_to":
                 highlighted_nodes.add(other_node_id)
 
@@ -237,6 +244,10 @@ def build_graph_neighborhood(
             included_edges[edge.id] = edge
             included_nodes.add(edge.source)
             included_nodes.add(edge.target)
+            if chunk_node_id in query_path_nodes:
+                query_path_edges.add(edge.id)
+                query_path_nodes.add(edge.source)
+                query_path_nodes.add(edge.target)
 
     nodes = [nodes_by_id[node_id] for node_id in nodes_by_id if node_id in included_nodes]
     edges = [edge for edge_id, edge in included_edges.items() if edge_id]
@@ -244,6 +255,8 @@ def build_graph_neighborhood(
     return GraphNeighborhood(
         seed_node_ids=seed_node_ids,
         highlighted_node_ids=sorted(highlighted_nodes),
+        query_path_node_ids=sorted(query_path_nodes),
+        query_path_edge_ids=sorted(query_path_edges),
         nodes=nodes,
         edges=edges,
     )
@@ -275,7 +288,10 @@ def _build_membership_graph(
                 target=chunk_node.id,
                 type="belongs_to",
                 weight=1.0,
-                metadata={"reason": "chunk_source_membership"},
+                metadata={
+                    "reason": "same_document",
+                    "explanation": "Same document: this chunk belongs to the source page represented by the document node.",
+                },
             )
         )
 
@@ -298,28 +314,33 @@ def _build_similarity_edges(
     similarity_top_k: int,
     similarity_threshold: float,
 ) -> list[GraphEdge]:
-    chunk_vectors: list[tuple[str, str, list[float]]] = []
+    chunk_vectors: list[tuple[str, str, list[float], dict[str, Any]]] = []
     for record in records:
         chunk_id = str(record.get("chunk_id", "")).strip()
         document_node_id = _document_node_id(record)
         embedding = _normalize_vector(_coerce_embedding(record.get("embedding")))
-        chunk_vectors.append((f"chunk::{chunk_id}", document_node_id, embedding))
+        chunk_vectors.append((f"chunk::{chunk_id}", document_node_id, embedding, record))
 
     edges_by_id: dict[str, GraphEdge] = {}
-    for index, (chunk_node_id, document_node_id, vector) in enumerate(chunk_vectors):
-        scored_neighbors: list[tuple[float, str, str]] = []
-        for other_index, (other_chunk_node_id, other_document_node_id, other_vector) in enumerate(chunk_vectors):
+    for index, (chunk_node_id, document_node_id, vector, record) in enumerate(chunk_vectors):
+        scored_neighbors: list[tuple[float, str, str, dict[str, Any]]] = []
+        for other_index, (other_chunk_node_id, other_document_node_id, other_vector, other_record) in enumerate(chunk_vectors):
             if index == other_index:
                 continue
             similarity = _dot(vector, other_vector)
             if similarity < similarity_threshold:
                 continue
-            scored_neighbors.append((similarity, other_chunk_node_id, other_document_node_id))
+            scored_neighbors.append((similarity, other_chunk_node_id, other_document_node_id, other_record))
 
         scored_neighbors.sort(key=lambda item: (-item[0], item[1]))
-        for similarity, other_chunk_node_id, other_document_node_id in scored_neighbors[:similarity_top_k]:
+        for rank, (similarity, other_chunk_node_id, other_document_node_id, other_record) in enumerate(
+            scored_neighbors[:similarity_top_k],
+            start=1,
+        ):
             source, target = sorted([chunk_node_id, other_chunk_node_id])
             edge_id = f"{source}--{target}::similar_to"
+            same_document = document_node_id == other_document_node_id
+            shared_metadata = _shared_metadata_reasons(record, other_record)
             edges_by_id.setdefault(
                 edge_id,
                 GraphEdge(
@@ -329,8 +350,14 @@ def _build_similarity_edges(
                     type="similar_to",
                     weight=similarity,
                     metadata={
-                        "reason": "embedding_similarity",
-                        "same_document": document_node_id == other_document_node_id,
+                        "reason": "nearest_neighbor_similarity",
+                        "explanation": _similarity_explanation(
+                            same_document=same_document,
+                            shared_metadata=shared_metadata,
+                        ),
+                        "rank": rank,
+                        "same_document": same_document,
+                        "shared_metadata": shared_metadata,
                     },
                 ),
             )
@@ -354,6 +381,7 @@ def _document_node(record: dict[str, Any]) -> GraphNode:
             "created_by": _text(record.get("created_by")),
             "created_on": _text(record.get("created_on")),
             "breadcrumbs": list(record.get("breadcrumbs", [])) if isinstance(record.get("breadcrumbs"), list) else [],
+            "summary": _summarize_text(record.get("text")),
         },
     )
 
@@ -374,6 +402,7 @@ def _chunk_node(record: dict[str, Any]) -> GraphNode:
             "source": _text(record.get("source")),
             "space_key": _text(record.get("space_key")),
             "word_count": int(record["word_count"]) if isinstance(record.get("word_count"), int) else None,
+            "summary": _summarize_text(record.get("text")),
         },
     )
 
@@ -443,3 +472,40 @@ def _dot(left: list[float], right: list[float]) -> float:
 
 def _text(value: object) -> str:
     return str(value).strip() if value not in (None, "") else ""
+
+
+def _summarize_text(value: object) -> str:
+    text = " ".join(_text(value).split())
+    if not text:
+        return ""
+    if len(text) <= SUMMARY_MAX_CHARS:
+        return text
+    truncated = text[: SUMMARY_MAX_CHARS - 3].rstrip()
+    return f"{truncated}..."
+
+
+def _shared_metadata_reasons(left: dict[str, Any], right: dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+
+    left_source = _text(left.get("source"))
+    if left_source and left_source == _text(right.get("source")):
+        reasons.append(f"same source ({left_source})")
+
+    left_space_key = _text(left.get("space_key"))
+    if left_space_key and left_space_key == _text(right.get("space_key")):
+        reasons.append(f"same space ({left_space_key})")
+
+    left_page_type = _text(left.get("page_type"))
+    if left_page_type and left_page_type == _text(right.get("page_type")):
+        reasons.append(f"same page type ({left_page_type})")
+
+    return reasons
+
+
+def _similarity_explanation(*, same_document: bool, shared_metadata: list[str]) -> str:
+    parts = ["Nearest-neighbor similarity"]
+    if same_document:
+        parts.append("same document")
+    if shared_metadata:
+        parts.append(f"shared metadata: {', '.join(shared_metadata)}")
+    return "; ".join(parts) + "."

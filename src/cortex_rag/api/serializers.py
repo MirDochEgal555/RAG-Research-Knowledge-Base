@@ -56,6 +56,8 @@ def build_graph_neighborhood_response(
     """Serialize a graph neighborhood into the API response shape."""
 
     highlighted_ids = set(neighborhood.highlighted_node_ids)
+    query_path_node_ids = set(neighborhood.query_path_node_ids)
+    query_path_edge_ids = set(neighborhood.query_path_edge_ids)
     return GraphNeighborhoodResponse(
         query=query,
         result_count=len(neighborhood.seed_node_ids),
@@ -66,6 +68,7 @@ def build_graph_neighborhood_response(
                 type=node.type,
                 label=node.label,
                 highlighted=node.id in highlighted_ids,
+                in_query_path=node.id in query_path_node_ids,
                 metadata=dict(node.metadata),
             )
             for node in neighborhood.nodes
@@ -77,6 +80,7 @@ def build_graph_neighborhood_response(
                 target=edge.target,
                 type=edge.type,
                 weight=edge.weight,
+                in_query_path=edge.id in query_path_edge_ids,
                 metadata=dict(edge.metadata),
             )
             for edge in neighborhood.edges

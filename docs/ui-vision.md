@@ -1,419 +1,389 @@
-# 🧠 CortexRAG UI Design
+# CortexRAG UI Vision
 ## Local Knowledge Graph Interface for Retrieval-Augmented Generation
 
----
+## Overview
 
-## 🚀 Overview
+CortexRAG is aiming at a local, explainable RAG interface where retrieval is visible instead of hidden behind a plain chat box.
 
-This project implements a **knowledge graph-based UI** on top of a RAG system.
+The long-term direction is still a "brain view" for local knowledge, but the repository is no longer at the purely conceptual stage. The current codebase already includes a working Version 1 graph UI, a thin API backend, and a persisted graph artifact built from the Confluence pipeline.
 
-Instead of a traditional chatbot interface, the system visualizes knowledge as a **living graph**, where:
+This document describes both the product direction and the current implementation status.
 
-- **Nodes** represent knowledge units (documents, chunks, concepts)
-- **Edges** represent relationships (semantic similarity, metadata, entities)
+## Product Direction
 
-The result is a **“brain-like interface”** that allows users to:
-- explore knowledge visually
-- understand retrieval paths
-- interact with data in an explainable way
+The project is moving toward a local knowledge operating system with four core capabilities:
 
----
+- visual graph exploration of the knowledge base
+- semantic retrieval over embedded Confluence chunks
+- grounded answer generation
+- inspectable evidence for why nodes and edges are shown
 
-## 🎯 Core Concept
+The important constraint remains the same: explainability comes before visual spectacle.
 
-> This is not just a RAG chatbot.
+## Current Status
 
-This is a:
+As of the current repo state, CortexRAG already ships the first usable graph workflow:
 
-## 👉 **Local Knowledge Operating System**
+- a package CLI for building the vector store, building the graph, searching, and answering
+- a persisted graph artifact at `storage/chroma/<collection>.graph.json`
+- a FastAPI backend under `src/cortex_rag/api/`
+- a React + TypeScript frontend under `frontend/`
+- a Cytoscape-based graph canvas with answer and detail side panels
 
-### Core components:
-- Graph-based knowledge visualization
-- Semantic retrieval engine
-- Chat interface
-- Document explorer
+This means the project has moved past "Phase 1 only". The MVP graph mode exists and is queryable end to end.
 
----
+## Implemented Today
 
-## 🎨 UI Vision
+### Backend and runtime
 
-### 🧠 Main Graph Canvas (“Brain View”)
+- `python -m cortex_rag ask` is the primary answer flow
+- `scripts/ask_confluence.py` is now just a thin compatibility wrapper around the CLI
+- the API exposes `GET /health`, `POST /search`, `POST /answer`, and `POST /graph/neighborhood`
+- the backend warms the embedding model and persisted graph artifact before serving UI traffic
+- answer responses include answer text, mode, backend, model, timings, and grounded sources
 
-- Dark-mode interface
-- Central interactive graph
-- Force-directed layout
+### Graph model
 
-#### Nodes represent:
-- documents
-- chunks
-- concepts
-- topics
-- entities (people, tools, projects)
+The current graph is intentionally narrow.
 
-#### Edges represent:
-- semantic similarity
-- shared metadata
-- citations
-- entity relationships
-- user-defined links
+Node types:
 
----
+- `document`
+- `chunk`
 
-## 🔍 Interactions
+Edge types:
 
-### Node Interaction
-Clicking a node opens a detail panel with:
-
-- summary
-- source document
-- related nodes
-- top similar chunks
-- suggested questions
-
----
-
-### Query Interaction
-
-User enters a query:
-
-- relevant nodes are highlighted
-- retrieval path is visualized
-- graph “activates” like neural signals
-
----
-
-### Visual Feedback
-
-- highlighted nodes = relevant knowledge
-- animated edges = retrieval flow
-- clusters = semantic neighborhoods
-
----
-
-## 🧩 UI Layout
-
-### 1. Main Graph Canvas
-- central visualization
-- zoom, pan, drag
-- clustering and grouping
-
----
-
-### 2. Right-side Detail Panel
-
-Displays:
-- node title
-- summary
-- source reference
-- related nodes
-- similar chunks
-
----
-
-### 3. Bottom Query Bar
-
-Example queries:
-- “What do I know about vector databases?”
-- “Show me clusters around RAG”
-- “Which notes connect AI automation and retrieval?”
-
----
-
-### 4. Mode Switch
-
-Switch between:
-- Graph Mode
-- Chat Mode
-- Document Explorer
-- Timeline Mode (optional)
-
----
-
-## 🧠 Data Model
-
-### Node Types
-- documents
-- chunks
-- entities
-- topics
-
-### Edge Types
-- `similar_to`
 - `belongs_to`
-- `mentions`
-- `cites`
-- `derived_from`
-- `related_to`
+- `similar_to`
 
----
+Current graph behavior:
 
-## 🔗 Relationship Generation
-
-### 1. Embedding Similarity
-- connect nodes above similarity threshold
-
----
-
-### 2. Shared Metadata
-- same source
-- same tags
-- same topic
-
----
-
-### 3. Entity Extraction
-- connect nodes sharing:
-  - tools
-  - people
-  - concepts
-  - organizations
-
----
-
-### 4. LLM-Inferred Links (Advanced)
-- dependency relationships
-- contradictions
-- semantic grouping
-
----
-
-## 🧱 Development Strategy
-
-### ⚠️ Important
-Do NOT build the full UI immediately.
-
----
-
-## ✅ Phase 1 — MVP (RAG Core)
-
-- ingest documents
-- chunk data
-- generate embeddings
-- store in vector DB
-- retrieve results
-- simple text-based interface
-
----
-
-## ✅ Phase 2 — Graph Mode
-
-- nodes = documents / chunks
-- edges = similarity / metadata
-- interactive graph visualization
-- node detail panel
-
----
-
-## ✅ Phase 3 — Brain UI
-
-- animated retrieval
-- node highlighting
-- clustering
-- semantic neighborhoods
-- query path visualization
-
----
-
-## 🧪 Iterative UI Versions
-
-### Version 1
-- nodes = documents
-- edges = similarity
-- click → document view
-- search highlights nodes
-
----
-
-### Version 2
-- nodes = chunks + topics
-- edges = similarity + entities
-- query highlights relevant chunks
-
----
-
-### Version 3
-- graph + chat combined
-- answer panel includes:
-  - used nodes
-  - reasoning path
-  - related knowledge
-
----
-
-## 🏆 Key Advantages
-
-Compared to standard RAG:
-
-### Traditional:
-- upload docs
-- ask question
-- get answer
-
----
-
-### This system:
-- visualizes knowledge
-- explains retrieval
-- shows relationships
-- enables exploration
-
----
-
-## 🎯 Benefits
-
-- more intuitive understanding of data
-- explainable AI behavior
-- strong portfolio project
-- extensible architecture
-- engaging UX
-
----
-
-## ⚙️ Tech Stack
-
-### Backend
-- Python + FastAPI
-- ChromaDB (or FAISS)
-- sentence-transformers
-- Ollama (local LLM)
-
----
+- document nodes are derived from chunk source metadata
+- chunk-to-document edges represent source membership
+- chunk-to-chunk edges are generated offline from cosine similarity
+- node metadata includes useful UI fields such as summaries, page/section labels, source path, headings, and counts
+- edge metadata includes readable explanations such as same-document links and nearest-neighbor similarity context
 
 ### Frontend
-- React + TypeScript
-- Tailwind CSS
 
----
+The current UI is a real working shell, not a placeholder.
 
-### Graph Visualization
-- Cytoscape.js (recommended)
-- React Flow (alternative)
-- Sigma.js (large graphs)
-- D3.js (custom)
+Implemented layout:
 
----
+- hero/status bar
+- query dock
+- central graph canvas
+- grounded answer panel
+- right-side detail panel
 
-### Optional
-- Neo4j (advanced graph DB)
+Implemented interactions:
 
----
+- submitting a query calls `/graph/neighborhood`, `/answer`, and `/search`
+- result nodes are highlighted in the graph
+- the query path is emphasized while non-path nodes and edges are visually de-emphasized
+- clicking a node opens detail metadata, retrieval evidence, related nodes, and edge explanations
+- the answer panel shows grounded sources with scores and source metadata
+- top hits are exposed separately for quick navigation
+- answer mode is selectable in the UI
 
-## 💡 Killer Feature
+Implemented visual direction:
 
-> Ask a question and watch the graph light up.
+- dark graph workspace
+- static explainability cues instead of heavy animation
+- pan/zoom/drag through Cytoscape
+- responsive layout for desktop and smaller screens
 
-- nodes activate based on relevance
-- connections animate
-- retrieval becomes visible
+## What Is Not Built Yet
 
----
+The following ideas are still aspirational and should stay documented as future work rather than current capability:
 
-## 🧠 Learning Outcomes
+- entity, concept, or topic nodes
+- `mentions`, `cites`, `derived_from`, or user-authored edge types
+- chat mode, document explorer mode, or timeline mode
+- animated "neural signal" retrieval effects
+- a separate graph database such as Neo4j
+- write-back or graph editing workflows
+- richer clustering, grouping, or semantic neighborhood controls
 
-This project teaches:
+## Future Vision
 
-- vector databases
-- embeddings
-- chunking strategies
-- retrieval systems
-- graph modeling
-- UI/UX for AI systems
-- explainability
+The current Version 1 UI proves the base interaction loop. The next vision should not be "more panels" by default. It should be a deeper knowledge interface that still keeps retrieval legible.
 
----
+The long-term product ambition is:
 
-## 🏷️ Project Name
+- asking questions against local knowledge
+- seeing why the system answered the way it did
+- exploring adjacent knowledge without losing context
+- gradually turning retrieval into a navigable workspace instead of a single response
 
-**CortexRAG**
+## Future Horizons
 
----
+### Horizon 1: Better Graph Workbench
 
-## 🔥 Final Recommendation
+This is the nearest future and should grow directly out of the current UI.
 
-Build this **layer by layer**:
+Expected additions:
 
-1. RAG backend
-2. simple graph
-3. interactive UI
-4. visual effects
+- graph controls for fit, reset, isolate selection, and depth expansion
+- richer node filtering by page, space, node type, and score threshold
+- better handling of dense neighborhoods through collapse, grouping, or lensing
+- stronger visual hierarchy between seed hits, support context, and background nodes
+- clearer transitions between one query state and the next
 
----
+The purpose of this horizon is not new ontology. It is to make the existing document/chunk graph easier to read and operate.
 
-## 🚫 Avoid
+### Horizon 2: Multi-Mode Knowledge Navigation
 
-- overengineering early
-- building full graph DB immediately
-- complex animations before MVP
-- huge datasets from the start
+Once Graph Mode is stable, the UI can branch into distinct but connected modes.
 
----
+Candidate modes:
 
-## 🚀 End Goal
+- Graph Mode for neighborhood exploration
+- Answer Mode for grounded response reading
+- Document Mode for source-page inspection
+- Search Mode for retrieval-first workflows
+- Timeline Mode for date-heavy spaces, if the source corpus justifies it
 
-A fully local, interactive, explainable AI system that feels like:
+The key requirement is shared state between modes:
 
-> **exploring your own brain**
+- the same active query
+- the same selected node
+- the same source set
+- the same evidence trail
 
----
+The UI should feel like one knowledge session viewed through different lenses, not like separate apps glued together.
 
-## Next TODOs
+### Horizon 3: Richer Knowledge Model
 
-The current repo is still in Phase 1: ingestion, embeddings, vector search, a package-level answer flow, and a thin API layer now exist, but there is still no frontend yet. The next work should stay narrow and produce a usable UI slice quickly.
+The current graph uses only `document` and `chunk` nodes. A future graph can become semantically richer, but only when the additional structure improves navigation rather than creating visual noise.
 
-### 1. Close out the current RAG surface
+Future node families:
 
-- Done: `src/cortex_rag/cli.py` now exposes a first-class `ask` command, and `scripts/ask_confluence.py` is only a thin compatibility wrapper.
-- Done: the package now returns structured answer data from `src/cortex_rag/generation/confluence_answering.py`, including answer text, retrieved chunks, timings, and model metadata.
-- Done: tests cover the package-level answer flow and CLI so a future web layer can call stable Python functions instead of shelling out to scripts.
+- entities such as people, tools, teams, projects, and systems
+- topics inferred from repeated chunk patterns
+- tags or source-defined taxonomy nodes
+- saved user collections or workspace nodes
 
-### 2. Add a thin backend for the UI
+Future edge families:
 
-- Done: a small FastAPI app now lives under `src/cortex_rag/api/`.
-- Done: the first four endpoints exist: `/health`, `/search`, `/answer`, and `/graph/neighborhood`.
-- Done: the API is read-only and wraps existing retrieval/generation code instead of inventing a separate graph database.
-- Done: request/response schemas exist for search results, answer payloads, and graph nodes/edges.
+- `mentions`
+- `related_to`
+- `cites`
+- `contradicts`
+- `depends_on`
+- user-authored links
 
-### 3. Define the MVP graph model
+This would shift the graph from "retrieval neighborhood" toward "knowledge map", but the bar for every new node or edge type should remain strict:
 
-- Done: the graph now starts with two node types, `document` and `chunk`.
-- Done: the graph now starts with two edge types, `belongs_to` and `similar_to`.
-- Done: `document -> chunk` links are built from existing chunk metadata.
-- Done: `chunk <-> chunk` similarity edges are built offline from embedding cosine similarity.
-- Done: graph-ready JSON is persisted alongside the vector store as `storage/chroma/<collection>.graph.json`.
+- it must improve explainability, discovery, or navigation
+- it must not turn the canvas into unreadable background texture
 
-### 4. Build Version 1 of the UI
+### Horizon 4: Retrieval Explainability as a First-Class UI
 
-- Scaffold a React + TypeScript frontend.
-- Use Cytoscape.js first; it fits the current graph vision without forcing a custom rendering engine too early.
-- Implement the initial layout from this doc:
-  - center graph canvas
-  - right detail panel
-  - bottom query bar
-- Keep the first visual pass simple: dark canvas, highlighted result nodes, basic pan/zoom/drag, no advanced animation yet.
+The current explainability layer is already useful, but the future version should make the system's reasoning path inspectable at multiple levels.
 
-### 5. Ship the first useful interaction loop
+Desired capabilities:
 
-- Query submission calls `/search` and highlights the top matching document/chunk nodes.
-- Clicking a node opens the detail panel with summary text, source page, section, and related nodes.
-- The answer view calls `/answer` and shows both the response and the retrieved sources used to produce it.
-- Add a mode toggle only after Graph Mode works; do not split effort across Chat Mode and Document Explorer yet.
+- query decomposition showing which terms or concepts drove retrieval
+- rerank explanations showing why one chunk beat another
+- prompt-construction inspection showing exactly which chunks were sent to the model
+- answer-to-source alignment showing which source spans support which answer claims
+- failure explanations when no grounded answer is produced
 
-### 6. Add explainability before polish
+The best future UI does not only show the result path. It shows where uncertainty, omission, and fallback happened.
 
-- Include retrieval scores and source metadata in the UI instead of hiding them.
-- Render the query result path as a selected subgraph rather than animating the whole canvas.
-- Capture why an edge exists: same document, nearest-neighbor similarity, or shared metadata.
-- Defer "brain-like" animations until the static explainability layer is clear and debuggable.
+### Horizon 5: Personal Knowledge Workspace
 
-### 7. Keep scope under control
+The longer-term vision is bigger than a Confluence viewer.
 
-- Do not introduce Neo4j yet.
-- Do not model entities/topics until document/chunk nodes are stable.
-- Do not build Timeline Mode in the first UI pass.
-- Do not spend time on fancy motion until search, selection, and answer grounding are reliable.
+CortexRAG can evolve into a local knowledge workspace where users:
 
-### Suggested implementation order
+- save queries and neighborhoods
+- pin important nodes
+- assemble temporary research boards
+- compare multiple answers or retrieval paths
+- annotate documents and chunks
+- create explicit links that feed back into later exploration
 
-1. Build the React graph shell and wire it to `/search`.
-2. Add the detail panel and answer panel.
-3. Add query-path highlighting and small visual polish.
+At that point the graph is no longer only generated from source data. It also begins to reflect user intent and working context.
+
+### Horizon 6: Agentic Research Surface
+
+If the repo later grows beyond a pure retrieval UI, the graph can become an execution surface for agentic workflows.
+
+Possible future interactions:
+
+- ask the system to investigate a topic and open a live evidence board
+- compare conflicting sources and cluster them by claim
+- generate a synthesis draft while keeping every claim traceable to source chunks
+- mark uncertain nodes for follow-up retrieval
+- spawn reusable "knowledge trails" for recurring questions
+
+This would only make sense if every agentic step remains inspectable. The graph should become the audit surface for agent behavior, not a decorative output.
+
+## Future UX Principles
+
+As the UI expands, these principles should stay fixed:
+
+- explanation beats ornament
+- a denser graph is not automatically a better graph
+- every visual effect must communicate state, not just style
+- every new mode must reuse the same evidence model
+- every answer should remain reversible back to retrieval evidence
+- local trust comes from inspectability, not from confident prose
+
+## Future Visual Direction
+
+The current dark graph shell is acceptable for Version 1, but the future visual language can become more intentional.
+
+Potential directions:
+
+- stronger visual distinction between retrieval state, answer state, and exploration state
+- spatial memory cues so repeated visits to the same neighborhood feel familiar
+- motion that communicates activation, dependency, or uncertainty
+- layered background systems that help reveal cluster scale without overwhelming the graph
+- selective use of animation for query-path activation, never as ambient noise
+
+The "brain view" metaphor is still useful, but it should be interpreted carefully. The goal is not science-fiction chrome. The goal is a UI that makes knowledge feel alive, navigable, and accountable.
+
+## Future Milestones
+
+### Version 2
+
+Likely focus:
+
+- stronger graph controls
+- better selection and navigation workflows
+- larger-neighborhood readability
+- early mode separation between graph exploration and document reading
+
+### Version 3
+
+Likely focus:
+
+- additional node and edge families
+- richer evidence views
+- answer-to-source alignment
+- saved sessions or pinned working sets
+
+### Version 4+
+
+Likely focus:
+
+- collaborative or user-authored graph structure
+- advanced explainability and audit tooling
+- agentic research workflows
+- a fuller local knowledge operating system rather than a single graph page
+
+## Future Guardrails
+
+Future vision should still respect a few limits:
+
+- do not add ontology faster than the UI can explain it
+- do not add animation faster than the product can justify it
+- do not add modes that duplicate one another
+- do not turn the graph into an unfiltered dump of every possible relationship
+- do not sacrifice grounded evidence for a more dramatic interface
+
+## Milestone Status
+
+### 1. RAG core
+
+Status: done
+
+- ingestion, chunking, embeddings, vector storage, retrieval, and grounded answering exist
+- the CLI is the stable package-level interface
+
+### 2. Thin backend for the UI
+
+Status: done
+
+- FastAPI app exists under `src/cortex_rag/api/`
+- request and response schemas exist for search, answers, and graph neighborhoods
+
+### 3. MVP graph model
+
+Status: done
+
+- document and chunk nodes exist
+- `belongs_to` and `similar_to` edges exist
+- graph JSON is persisted beside the vector store
+
+### 4. Version 1 UI
+
+Status: done
+
+- React + TypeScript frontend exists
+- Cytoscape is integrated
+- graph canvas, answer panel, and detail panel are live
+
+### 5. First useful interaction loop
+
+Status: done
+
+- query -> retrieval -> graph neighborhood -> grounded answer works in one UI flow
+- node selection and source inspection work
+
+### 6. Explainability before polish
+
+Status: largely done for Version 1
+
+- retrieval scores are visible
+- grounded sources are visible
+- selected-node evidence is visible
+- edge explanations are visible
+- query-path emphasis is visible
+
+What remains here is refinement, not invention.
+
+### 7. Scope control
+
+Status: still active
+
+The original guardrails remain correct:
+
+- do not add Neo4j yet
+- do not add new node families until document/chunk behavior is stable
+- do not split effort across multiple UI modes yet
+- do not spend time on flashy animation before the retrieval story is solid
+
+## Updated Tech Stack
+
+### Backend
+
+- Python
+- FastAPI
+- Chroma or FAISS
+- sentence-transformers
+- Ollama
+
+### Frontend
+
+- React 18
+- TypeScript
+- Vite
+- hand-written CSS in `frontend/src/styles.css`
+
+### Graph visualization
+
+- Cytoscape.js
+
+## Recommended Next Work
+
+The next steps should be incremental and preserve the current narrow scope:
+
+1. tighten the current graph UX with better loading, reset, fit, and selection controls
+2. improve graph readability for larger neighborhoods before adding more node types
+3. add small polish to empty/error states and evidence presentation
+4. only then evaluate whether a second mode is justified
+
+## Bottom Line
+
+The repository now has a real Version 1 Brain View:
+
+- local graph neighborhood retrieval
+- grounded answering
+- evidence inspection
+- explainable node and edge rendering
+
+The remaining work is to deepen this interface carefully, not to restart from a blank vision document.

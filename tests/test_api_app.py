@@ -41,17 +41,26 @@ def test_create_app_raises_clear_error_without_fastapi(monkeypatch) -> None:
 
 
 @pytest.mark.skipif(not (_has_fastapi() and _has_httpx()), reason="FastAPI test dependencies are not installed.")
-def test_health_endpoint_returns_ok() -> None:
+def test_health_endpoint_returns_ok(monkeypatch) -> None:
     from fastapi.testclient import TestClient
 
     from cortex_rag.api import app as api_app
 
+    warmed: list[tuple[str, object]] = []
+
+    def fake_warm_ui_runtime_assets(*, persist_dir=None, collection_name="confluence") -> None:
+        warmed.append((collection_name, persist_dir))
+
+    monkeypatch.setattr(api_app, "_WARMED_UI_RUNTIME_KEYS", set())
+    monkeypatch.setattr(api_app, "warm_ui_runtime_assets", fake_warm_ui_runtime_assets)
     client = TestClient(api_app.create_app())
 
     response = client.get("/health")
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "service": "cortex_rag"}
+    assert len(warmed) == 1
+    assert warmed[0][0] == "confluence"
 
 
 @pytest.mark.skipif(not (_has_fastapi() and _has_httpx()), reason="FastAPI test dependencies are not installed.")
@@ -73,6 +82,13 @@ def test_search_endpoint_serializes_results(monkeypatch) -> None:
             )
         ]
 
+    warmed: list[tuple[str, object]] = []
+
+    def fake_warm_ui_runtime_assets(*, persist_dir=None, collection_name="confluence") -> None:
+        warmed.append((collection_name, persist_dir))
+
+    monkeypatch.setattr(api_app, "_WARMED_UI_RUNTIME_KEYS", set())
+    monkeypatch.setattr(api_app, "warm_ui_runtime_assets", fake_warm_ui_runtime_assets)
     monkeypatch.setattr(api_app, "retrieve_confluence_context", fake_retrieve_context)
     client = TestClient(api_app.create_app())
 
@@ -91,6 +107,8 @@ def test_search_endpoint_serializes_results(monkeypatch) -> None:
             }
         ],
     }
+    assert len(warmed) == 1
+    assert warmed[0][0] == "confluence"
 
 
 @pytest.mark.skipif(not (_has_fastapi() and _has_httpx()), reason="FastAPI test dependencies are not installed.")
